@@ -112,7 +112,7 @@ h2{font-size:17px;font-weight:500;margin:24px 4px 10px}
 </aside>
 <main>
  <div class="top"><label class="s"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></svg><input id="gs" placeholder="Cari barang..." aria-label="Cari barang"></label>
- <div class="me"><span id="syncst" style="font-size:11px;color:var(--mute);margin-right:10px"></span><span id="who">Admin Gudang</span><span class="ava" id="ava">AG</span><svg class="bell" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 17V11a6 6 0 0112 0v6l2 2H4zM10 21h4"/></svg></div></div>
+ <div class="me"><button id="impBtn" onclick="imporLama()" style="all:unset;cursor:pointer;font-size:11px;color:var(--teal);text-decoration:underline;margin-right:10px">Impor data lama</button><span id="syncst" style="font-size:11px;color:var(--mute);margin-right:10px"></span><span id="who">Admin Gudang</span><span class="ava" id="ava">AG</span><svg class="bell" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 17V11a6 6 0 0112 0v6l2 2H4zM10 21h4"/></svg></div></div>
  <div id="main"></div>
 </main>
 </div>
@@ -439,5 +439,25 @@ try{
     $('#us').focus();
   }
 }catch(e){ $('#us').focus(); }
+async function imporLama(){
+  if(!window.fbDb||!window.fbAuth||!window.fbAuth.currentUser)return toast('Login akun cloud dulu');
+  try{
+    const doc=await window.fbDb.collection('gudang').doc('main').get();
+    if(!doc.exists)return toast('Data lama (gudang/main) tidak ditemukan');
+    const d=doc.data(),oi=Array.isArray(d.items)?d.items:[],om=Array.isArray(d.masuk)?d.masuk:[],op=Array.isArray(d.pinjam)?d.pinjam:[];
+    let a=0,b=0,c=0;
+    const kd=new Set(items.map(i=>String(i.kode).toLowerCase()));
+    oi.forEach(i=>{if(i&&i.kode&&!kd.has(String(i.kode).toLowerCase())){items.push(i);kd.add(String(i.kode).toLowerCase());a++}});
+    const ms=m=>[m.tgl,m.kode,m.qty,m.sup,m.oleh].join('|'),mset=new Set(masuk.map(ms));
+    om.forEach(m=>{if(m&&!mset.has(ms(m))){masuk.push(m);mset.add(ms(m));b++}});
+    const ps=p=>[p.tgl,p.kode,p.qty,p.orang,p.untuk].join('|'),pset=new Set(pinjam.map(ps)),pid=new Set(pinjam.map(p=>p.id));
+    op.forEach(p=>{if(p&&!pset.has(ps(p))&&!(p.id&&pid.has(p.id))){if(!p.id)p.id=Date.now().toString(36)+Math.random().toString(36).slice(2,6);pinjam.push(p);pset.add(ps(p));c++}});
+    saveData();go(view||'dash');
+    try{localStorage.setItem('gk_imported','1')}catch(e){}
+    const bt=document.getElementById('impBtn');if(bt)bt.hidden=true;
+    toast('Impor selesai: '+a+' barang, '+b+' catatan masuk, '+c+' catatan ambil/kembali baru');
+  }catch(e){toast('Gagal impor: '+(e.code||e.message))}
+}
+try{if(localStorage.getItem('gk_imported')){const bt=document.getElementById('impBtn');if(bt)bt.hidden=true}}catch(e){}
 if(window.fbAuth)window.fbAuth.onAuthStateChanged(u=>{if(u)startSync();else setSync('Mode lokal: belum masuk akun cloud',1)});
 </script></body></html>
