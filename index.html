@@ -152,8 +152,9 @@ try{
 <script>
 const $=s=>document.querySelector(s);
 const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const IC={dash:'<path d="M3 11l9-8 9 8v9a1 1 0 01-1 1h-5v-6H9v6H4a1 1 0 01-1-1z"/>',cari:'<circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/>',daftar:'<path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>',masuk:'<path d="M12 3v12M7 10l5 5 5-5M4 21h16"/>',pinjam:'<path d="M7 7h12l-3-3M17 17H5l3 3"/>',out:'<path d="M9 4H5v16h4M16 8l4 4-4 4M20 12H9"/>',panduan:'<path d="M4 5a2 2 0 012-2h13v16H6a2 2 0 00-2 2zM4 19a2 2 0 012-2h13"/><path d="M9 7h6M9 11h6"/>'};
-const VIEWS=[['dash','Dasbor'],['cari','Cari Lokasi'],['daftar','Daftar Sampel'],['masuk','Barang Masuk'],['pinjam','Ambil & Kembali']];
+const IC={dash:'<path d="M3 11l9-8 9 8v9a1 1 0 01-1 1h-5v-6H9v6H4a1 1 0 01-1-1z"/>',cari:'<circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/>',daftar:'<path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>',masuk:'<path d="M12 3v12M7 10l5 5 5-5M4 21h16"/>',pinjam:'<path d="M7 7h12l-3-3M17 17H5l3 3"/>',out:'<path d="M9 4H5v16h4M16 8l4 4-4 4M20 12H9"/>',panduan:'<path d="M4 5a2 2 0 012-2h13v16H6a2 2 0 00-2 2zM4 19a2 2 0 012-2h13"/><path d="M9 7h6M9 11h6"/>',riwayat:'<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/>'};
+const VIEWS=[['dash','Dasbor'],['cari','Cari Lokasi'],['daftar','Daftar Sampel'],['masuk','Barang Masuk'],['pinjam','Ambil & Kembali'],['riwayat','Riwayat 14 Hari']];
+let riwayatFilter='Semua';
 let items=[
 {kode:'SGR 0000000001',nama:'Kemeja Lengan Panjang',kat:'Garment',stok:3,sat:'pcs',lok:'Januari General 1',min:0,buyer:'Ann Taylor',style:'AT-2026-01',color:'Putih, Hitam'},
 {kode:'SGR 0000000002',nama:'Hoodie',kat:'Garment',stok:3,sat:'pcs',lok:'Januari General 1',min:0,buyer:'LL Bean',style:'LB-2026-02',color:'Navy, Abu'},
@@ -267,10 +268,43 @@ const pill=i=>`<span class="st ${stat(i)[1]}">${stat(i)[0]}</span>`;
 const th=i=>`<div class="th" style="background:hsl(${[...String(i.kode||'?')].reduce((a,c)=>a+c.charCodeAt(0)*7,0)%360} 50% 58%)">${esc((i.nama||'?')[0])}</div>`;
 function toast(t){const e=$('#toast');e.textContent=t;e.classList.add('on');clearTimeout(toast.t);toast.t=setTimeout(()=>e.classList.remove('on'),2200)}
 function nav(){$('#nav').innerHTML=VIEWS.map(([k,l])=>`<button class="${k===view?'on':''}" onclick="go('${k}')"><svg viewBox="0 0 24 24">${IC[k]}</svg>${l}</button>`).join('')+`<hr><button class="${view==='panduan'?'on':''}" onclick="go('panduan')"><svg viewBox="0 0 24 24">${IC.panduan}</svg>Panduan Cara Pakai</button><button onclick="doLogout()"><svg viewBox="0 0 24 24">${IC.out}</svg>Keluar</button>`}
-function go(v){view=v;nav();({dash,cari,daftar,masuk:masukV,pinjam:pinjamV,panduan:panduanV})[v]()}
+function go(v){view=v;nav();({dash,cari,daftar,masuk:masukV,pinjam:pinjamV,riwayat:riwayatV,panduan:panduanV})[v]()}
 const opts=()=>items.map(i=>`<option value="${esc(i.kode)}">${esc(i.kode)} - ${esc(i.nama)} (stok ${i.stok} ${esc(i.sat)})</option>`).join('');
 function info(){const v=$('#m1')?.value||'';const i=find(v.trim().toUpperCase());const el=$('#minfo');if(!el)return;el.textContent=i?`Kode lama: ${i.nama} - Stok sekarang ${i.stok} ${i.sat} - ${i.lok} - ${i.kat} - Jumlah baru akan ditambah ke stok ini`:(v.trim()?`Kode baru: akan dibuat sebagai sampel baru di ${$('#m5')?.value||'Januari General 1'}`:'')}
 const head=(t,b='')=>`<div class="head"><h1>${t}</h1>${b}</div>`;
+
+function parseTglId(s){try{const parts=String(s||'').split('/');if(parts.length===3){const d=new Date(Number(parts[2]),Number(parts[1])-1,Number(parts[0]));d.setHours(0,0,0,0);return d;}}catch(e){} return null;}
+function riwayatV(){
+  const today=new Date(); today.setHours(0,0,0,0);
+  const batas=new Date(today); batas.setDate(batas.getDate()-13);
+  const list=[];
+  (masuk||[]).forEach(m=>{
+    const d=parseTglId(m.tgl); if(!d||d<batas) return;
+    const it=find(m.kode)||{nama:m.kode};
+    list.push({d:d,tgl:m.tgl,tipe:'Masuk',kode:m.kode,nama:it.nama,qty:m.qty,oleh:m.oleh||'-',ket:'Buyer: '+(m.sup||'-')});
+  });
+  (pinjam||[]).forEach(p=>{
+    const it=find(p.kode)||{nama:p.kode};
+    const dAmbil=parseTglId(p.tgl);
+    if(dAmbil && dAmbil>=batas) list.push({d:dAmbil,tgl:p.tgl,tipe:'Ambil',kode:p.kode,nama:it.nama,qty:p.qty,oleh:p.oleh||'-',ket:'Diambil oleh '+ (p.orang||'-') +' - '+(p.untuk||'-')});
+    if(p.st==='Dikembalikan'){
+      const dKembali=parseTglId(p.tgl_kembali||p.tgl);
+      if(dKembali && dKembali>=batas) list.push({d:dKembali,tgl:p.tgl_kembali||p.tgl,tipe:'Kembali',kode:p.kode,nama:it.nama,qty:p.qty,oleh:p.oleh_kembali||p.oleh||'-',ket:'Dikembalikan oleh '+(p.oleh_kembali||p.oleh||'-')});
+    }
+  });
+  list.sort((a,b)=>b.d-a.d);
+  const fList = riwayatFilter==='Semua' ? list : list.filter(x=>x.tipe===riwayatFilter);
+  const cMasuk=list.filter(x=>x.tipe==='Masuk').reduce((a,x)=>a+x.qty,0);
+  const cAmbil=list.filter(x=>x.tipe==='Ambil').reduce((a,x)=>a+x.qty,0);
+  const cKembali=list.filter(x=>x.tipe==='Kembali').reduce((a,x)=>a+x.qty,0);
+  const badge=(tipe)=> tipe==='Masuk' ? '<span class="st ok">Masuk</span>' : tipe==='Ambil' ? '<span class="st low">Ambil</span>' : '<span class="st" style="background:#dff0ff;color:#1a5a8a">Kembali</span>';
+  const btn=(label)=>`<button class="btn sm" style="background:${riwayatFilter===label?'var(--ink)':'var(--pill)'};color:${riwayatFilter===label?'#fff':'var(--ink)'}" onclick="riwayatFilter='${label}';riwayatV()">${label}</button>`;
+  $('#main').innerHTML=head('Riwayat 14 Hari - Aktivitas Gudang')+
+  `<div class="k" style="margin:0 4px 12px">Semua aktivitas 14 hari terakhir: barang masuk, ambil, dan kembali. Diurutkan dari yang paling baru.</div>`+
+  `<div class="bar2"><span class="pill"><b>${cMasuk}</b> pcs masuk</span><span class="pill"><b>${cAmbil}</b> pcs diambil</span><span class="pill"><b>${cKembali}</b> pcs dikembalikan</span><span class="pill"><b>${list.length}</b> aktivitas</span></div>`+
+  `<div style="display:flex;gap:8px;flex-wrap:wrap;margin:10px 4px">${btn('Semua')}${btn('Masuk')}${btn('Ambil')}${btn('Kembali')}</div>`+
+  (fList.length ? fList.map(x=>`<div class="row">${badge(x.tipe)}<div><div class="n">${esc(x.nama)}</div><div class="k">${esc(x.kode)} - ${x.qty} pcs</div><div class="k">${esc(x.ket)}</div><div class="k">Oleh: ${esc(x.oleh)}</div></div><div class="k" style="text-align:right">${esc(x.tgl)}</div></div>`).join('') : '<div class="empty">Belum ada aktivitas dalam 14 hari terakhir.</div>')
+}
 
 function panduanV(){
  $('#main').innerHTML=head('Panduan Cara Pakai - Gudang')+`
@@ -394,7 +428,7 @@ function pinjamV(){
 function ambil(){const k=$('#p1').value,n=+$('#p2').value,o=$('#p3').value.trim(),untuk=$('#p4')?.value.trim()||'-',janji=$('#p5')?.value||'',i=find(k);
  if(n<1||!o)return toast('Isi jumlah dan nama pengambil');if(!untuk||untuk==='-')return toast('Isi Untuk apa, contoh: fitting / foto');if(!janji)return toast('Isi Janji kembali tanggal berapa');if(i.stok<n)return toast('Stok tidak cukup, sisa '+i.stok);
  const olehAmbil=siapa(); (i.stok-=n,addDelta(i.kode,-n));i.oleh=olehAmbil;i.aksi='-'+n+' pcs (diambil '+o+')';i.tgl_ubah=tgl();pinjam.push({id:Date.now().toString(36)+Math.random().toString(36).slice(2,6),kode:k,qty:n,orang:o,untuk:untuk,janji:janji,tgl:tgl(),st:'Diambil',oleh:olehAmbil});saveData();toast('Pengambilan dicatat oleh '+olehAmbil);pinjamV()}
-function kembali(id){const p=pinjam.find(x=>x.id===id);if(!p)return toast('Catatan tidak ditemukan');if(p.st!=='Diambil')return toast('Barang sudah dikembalikan');p.st='Dikembalikan';p.oleh_kembali=siapa();const it=find(p.kode);if(it){(it.stok+=p.qty,addDelta(it.kode,p.qty));it.oleh=siapa();it.aksi='+'+p.qty+' pcs (dikembalikan)';it.tgl_ubah=tgl();toast('Barang dikembalikan ke rak '+it.lok+' oleh '+siapa())}else{toast('Barang dikembalikan')}saveData();pinjamV()}
+function kembali(id){const p=pinjam.find(x=>x.id===id);if(!p)return toast('Catatan tidak ditemukan');if(p.st!=='Diambil')return toast('Barang sudah dikembalikan');p.st='Dikembalikan';p.oleh_kembali=siapa();p.tgl_kembali=tgl();const it=find(p.kode);if(it){(it.stok+=p.qty,addDelta(it.kode,p.qty));it.oleh=siapa();it.aksi='+'+p.qty+' pcs (dikembalikan)';it.tgl_ubah=tgl();toast('Barang dikembalikan ke rak '+it.lok+' oleh '+siapa())}else{toast('Barang dikembalikan')}saveData();pinjamV()}
 
 $('#gs').addEventListener('keydown',e=>{if(e.key==='Enter'){q=e.target.value;if(view==='daftar'){daftar()}else{kat='';stf='';go('cari')}}});
 $('#gs').addEventListener('input',e=>{q=e.target.value;if(view==='cari'){const qi=$('#q');if(qi&&qi.value!==q)qi.value=q;list()}else if(view==='daftar'){daftar()}});
