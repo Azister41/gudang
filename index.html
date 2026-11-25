@@ -112,7 +112,7 @@ h2{font-size:17px;font-weight:500;margin:24px 4px 10px}
 </aside>
 <main>
  <div class="top"><label class="s"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></svg><input id="gs" placeholder="Cari barang..." aria-label="Cari barang"></label>
- <div class="me"><span id="who">Admin Gudang</span><span class="ava" id="ava">AG</span><svg class="bell" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 17V11a6 6 0 0112 0v6l2 2H4zM10 21h4"/></svg></div></div>
+ <div class="me"><span id="syncst" style="font-size:11px;color:var(--mute);margin-right:10px"></span><span id="who">Admin Gudang</span><span class="ava" id="ava">AG</span><svg class="bell" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 17V11a6 6 0 0112 0v6l2 2H4zM10 21h4"/></svg></div></div>
  <div id="main"></div>
 </main>
 </div>
@@ -130,6 +130,7 @@ h2{font-size:17px;font-weight:500;margin:24px 4px 10px}
 <div id="toast" role="status"></div><div id="lihatModal" class="lihat-overlay" onclick="if(event.target===this)tutupLihat()"></div>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
 <script>
 const firebaseConfig = {
   apiKey: "AIzaSyAIYq9v-tiM9neIT398zDyE4NovEtGRvro",
@@ -143,6 +144,7 @@ if('serviceWorker' in navigator){window.addEventListener('load',()=>{navigator.s
 try{
   if(window.firebase && !firebase.apps.length){ firebase.initializeApp(firebaseConfig); }
   window.fbDb = (window.firebase && firebase.firestore) ? firebase.firestore() : null;
+  window.fbAuth = (window.firebase && firebase.auth) ? firebase.auth() : null;
   window.fbStorage = null; // Storage dimatikan - project Spark baru wajib Blaze, jadi foto pakai Firestore saja
   console.log('Firebase OK (Firestore only, tanpa Storage):', !!window.fbDb);
 }catch(e){ console.log('Firebase belum aktif:', e.message); window.fbDb=null; window.fbStorage=null; }
@@ -166,30 +168,43 @@ function siapa(){try{const w=$('#who')?.textContent?.trim(); if(w && w!=='Admin 
 const DATA_KEY='gk_data_v5';
 function saveData(){
   try{localStorage.setItem(DATA_KEY,JSON.stringify({items,masuk,pinjam}))}catch(e){}
-  try{
-    if(window.fbDb){
-      window.fbDb.collection('gudang').doc('main').set({items,masuk,pinjam,updatedAt:new Date().toISOString()},{merge:true}).catch(e=>console.log('Sync Firestore gagal:',e.message));
-    }
-  }catch(e){}
+  pushCloud();
 }
-async function loadFromFirebase(){
+// === SINKRON CLOUD: 1 dokumen per barang/catatan, stok lewat increment, realtime antar perangkat ===
+const SYNC={sent:{},delta:{},busy:false,again:false,ready:false,started:false,unsubs:[]};
+const sj=o=>JSON.stringify(o,Object.keys(o).sort()),sid=s=>String(s).replace(/[^A-Za-z0-9_-]/g,'_');
+function addDelta(k,n){SYNC.delta[k]=(SYNC.delta[k]||0)+n}
+function setSync(t,bad){const e=document.getElementById('syncst');if(e){e.textContent=t;e.style.color=bad?'#d9534f':''}}
+async function pushCloud(){
+  if(!window.fbDb||!window.fbAuth||!window.fbAuth.currentUser){setSync('Mode lokal: belum masuk akun cloud',1);return}
+  if(!SYNC.ready)return;
+  if(SYNC.busy){SYNC.again=true;return}
+  SYNC.busy=true;setSync('Menyinkronkan...');
   try{
-    if(!window.fbDb) return;
-    const doc=await window.fbDb.collection('gudang').doc('main').get();
-    if(doc.exists){
-      const d=doc.data();
-      if(Array.isArray(d.items)&&d.items.length){
-        // Kalau Firestore lebih baru / lebih banyak, pakai Firestore
-        const localLen=items.length;
-        if(d.items.length>=localLen){
-          items=d.items; if(Array.isArray(d.masuk))masuk=d.masuk; if(Array.isArray(d.pinjam))pinjam=d.pinjam;
-          try{localStorage.setItem(DATA_KEY,JSON.stringify({items,masuk,pinjam}))}catch(e){}
-          if(typeof go==='function'){ go(view||'dash'); }
-          console.log('Data dari Firebase dimuat:', items.length, 'barang');
-        }
-      }
-    }
-  }catch(e){ console.log('Load Firebase gagal, pakai lokal:', e.message); }
+    const db=window.fbDb,inc=firebase.firestore.FieldValue.increment,ops=[],next={},sentDelta={...SYNC.delta};
+    const add=(col,id,data,dl)=>{const k=col+'/'+id,j=sj(data);next[k]=j;if(dl||SYNC.sent[k]!==j)ops.push({ref:db.collection(col).doc(id),data:dl?{...data,stok:inc(dl)}:data})};
+    items.forEach(i=>{const d={...i};delete d.foto;const id=sid(i.kode);add('gudang_barang',id,d,SYNC.sent['gudang_barang/'+id]?SYNC.delta[i.kode]:0)});
+    masuk.forEach(m=>{if(!m.id)m.id=Date.now().toString(36)+Math.random().toString(36).slice(2,6);const d={...m};delete d.foto;add('gudang_masuk',m.id,d)});
+    pinjam.forEach(p=>add('gudang_pinjam',p.id,p));
+    Object.keys(SYNC.sent).forEach(k=>{if(!(k in next)){const q=k.split('/');ops.push({ref:db.collection(q[0]).doc(q[1]),del:1})}});
+    for(let n=0;n<ops.length;n+=400){const b=db.batch();ops.slice(n,n+400).forEach(o=>o.del?b.delete(o.ref):b.set(o.ref,o.data,{merge:true}));await b.commit()}
+    Object.keys(sentDelta).forEach(k=>{SYNC.delta[k]-=sentDelta[k];if(!SYNC.delta[k])delete SYNC.delta[k]});
+    SYNC.sent=next;setSync('Tersinkron '+new Date().toLocaleTimeString('id-ID',{hour:'2-digit',minute:'2-digit'}));
+  }catch(e){setSync('Gagal sinkron: '+(e.code||e.message),1)}
+  SYNC.busy=false;if(SYNC.again){SYNC.again=false;pushCloud()}
+}
+function startSync(){
+  const db=window.fbDb;if(!db||!window.fbAuth||!window.fbAuth.currentUser||SYNC.started)return;SYNC.started=true;
+  let first=3;const done=()=>{if(--first===0){SYNC.ready=true;pushCloud();if(typeof loadFotoDariFirestore==='function')loadFotoDariFirestore()}};
+  const ren=()=>{clearTimeout(SYNC.t);SYNC.t=setTimeout(()=>{try{localStorage.setItem(DATA_KEY,JSON.stringify({items,masuk,pinjam}))}catch(e){}
+    if(typeof go==='function'&&!(document.activeElement&&document.activeElement.matches&&document.activeElement.matches('input,textarea,select')))go(view||'dash')},250)};
+  const watch=(col,get,keyOf)=>{let f=1;SYNC.unsubs.push(db.collection(col).onSnapshot(sn=>{
+    sn.docChanges().forEach(c=>{if(c.doc.metadata.hasPendingWrites)return;const d=c.doc.data(),k=col+'/'+c.doc.id,a=get(),ix=a.findIndex(x=>keyOf(x)===c.doc.id);
+      if(c.type==='removed'){if(ix>=0)a.splice(ix,1);delete SYNC.sent[k];return}
+      let o;if(ix>=0){o=Object.assign(a[ix],d)}else{o=d;a.push(o)}
+      const cp={...o};delete cp.foto;SYNC.sent[k]=sj(cp)});
+    ren();if(f){f=0;done()}},e=>setSync('Gagal sinkron: '+(e.code||e.message),1)))};
+  watch('gudang_barang',()=>items,x=>sid(x.kode));watch('gudang_masuk',()=>masuk,x=>x.id);watch('gudang_pinjam',()=>pinjam,x=>x.id);
 }
 function loadData(){try{const raw=localStorage.getItem(DATA_KEY);if(!raw)return;const d=JSON.parse(raw);if(Array.isArray(d.items)&&d.items.length)items=d.items;if(Array.isArray(d.masuk))masuk=d.masuk;if(Array.isArray(d.pinjam))pinjam=d.pinjam;}catch(e){}}
 loadData();
@@ -197,7 +212,7 @@ loadData();
 
 // --- FOTO: Upload dari galeri + auto kompres, siap Firebase ---
 let pendingFotoMasuk=null, pendingFotoDaftar=null;
-const FIREBASE_CONFIG={apiKey:"AIzaSyAIYq9v-tiM9neIT398zDyE4NovEtGRvro",authDomain:"caffee-38697.firebaseapp.com",projectId:"caffee-38697",storageBucket:"caffee-38697.firebasestorage.app",messagingSenderId:"465437187056",appId:"1:465437187056:web:5363e4074bdf3ffa411b35"};
+const FIREBASE_CONFIG=firebaseConfig;
 // CARA PAKAI FIREBASE:
 // 1. Di Firebase Console buat project, aktifkan Storage + Firestore
 // 2. Isi FIREBASE_CONFIG di atas dengan config project kamu
@@ -253,7 +268,7 @@ const th=i=>`<div class="th" style="background:hsl(${[...String(i.kode||'?')].re
 function toast(t){const e=$('#toast');e.textContent=t;e.classList.add('on');clearTimeout(toast.t);toast.t=setTimeout(()=>e.classList.remove('on'),2200)}
 function nav(){$('#nav').innerHTML=VIEWS.map(([k,l])=>`<button class="${k===view?'on':''}" onclick="go('${k}')"><svg viewBox="0 0 24 24">${IC[k]}</svg>${l}</button>`).join('')+`<hr><button class="${view==='panduan'?'on':''}" onclick="go('panduan')"><svg viewBox="0 0 24 24">${IC.panduan}</svg>Panduan Cara Pakai</button><button onclick="doLogout()"><svg viewBox="0 0 24 24">${IC.out}</svg>Keluar</button>`}
 function go(v){view=v;nav();({dash,cari,daftar,masuk:masukV,pinjam:pinjamV,panduan:panduanV})[v]()}
-const opts=()=>items.map(i=>`<option value="${i.kode}">${esc(i.kode)} - ${esc(i.nama)} (stok ${i.stok} ${esc(i.sat)})</option>`).join('');
+const opts=()=>items.map(i=>`<option value="${esc(i.kode)}">${esc(i.kode)} - ${esc(i.nama)} (stok ${i.stok} ${esc(i.sat)})</option>`).join('');
 function info(){const v=$('#m1')?.value||'';const i=find(v.trim().toUpperCase());const el=$('#minfo');if(!el)return;el.textContent=i?`Kode lama: ${i.nama} - Stok sekarang ${i.stok} ${i.sat} - ${i.lok} - ${i.kat} - Jumlah baru akan ditambah ke stok ini`:(v.trim()?`Kode baru: akan dibuat sebagai sampel baru di ${$('#m5')?.value||'Januari General 1'}`:'')}
 const head=(t,b='')=>`<div class="head"><h1>${t}</h1>${b}</div>`;
 
@@ -285,7 +300,7 @@ function dash(){
  $('#main').innerHTML=head('Ringkasan Gudang',`<button class="btn" onclick="go('masuk')">Catat barang masuk</button>`)+
  `<div class="bar2"><span class="pill">14 hari terakhir</span><span class="pill"><b>${items.length}</b> jenis barang</span><span class="pill"><b>${items.reduce((a,i)=>a+i.stok,0)}</b> total stok</span><span class="pill"><b>${out}</b> sedang diambil</span><span class="leg"><u class="y"></u>Dipilih<u></u>Lainnya</span></div>
  <div class="chart"><div class="yax">${[mx,mx*2/3,mx/3,0].map(v=>`<span>${Math.round(v)}</span>`).join('')}</div><div class="bars">${bars}</div></div>
- <div class="dgrid"><div><h3>Perlu diisi ulang</h3>${low.map(i=>`<div class="row c" onclick="sel='${i.kode}';go('cari')">${fotoThumb(i)}<div><div class="n">${esc(i.nama)}</div><div class="k">${esc(i.kode)}</div></div><div>${pill(i)}</div><div class="big">${i.stok} <small class="k">${esc(i.sat)}</small></div><div class="k">Rak ${esc(i.lok)}</div></div>`).join('')||'<div class="empty">Semua stok aman.</div>'}</div>
+ <div class="dgrid"><div><h3>Perlu diisi ulang</h3>${low.map(i=>`<div class="row c" onclick="sel=${esc(JSON.stringify(i.kode))};go('cari')">${fotoThumb(i)}<div><div class="n">${esc(i.nama)}</div><div class="k">${esc(i.kode)}</div></div><div>${pill(i)}</div><div class="big">${i.stok} <small class="k">${esc(i.sat)}</small></div><div class="k">Rak ${esc(i.lok)}</div></div>`).join('')||'<div class="empty">Semua stok aman.</div>'}</div>
  ${low.length?`<div class="alert"><h3>Stok menipis!</h3><p>${low.length} barang perlu diisi ulang segera.</p><button class="btn y sm" onclick="go('masuk')">Catat masuk</button>`: `<div class="alert" style="background:linear-gradient(160deg,#dff5ea,#bfe9d2)"><h3>Semua stok aman!</h3><p>Tidak ada barang yang menipis atau habis.</p><button class="btn y sm" onclick="go('daftar')">Lihat daftar</button>`}<svg viewBox="0 0 120 80" aria-hidden="true"><path d="M30 80V50h30V30h30V10h30v70z" fill="#f4a8bd"/><path d="M20 80c-2-30 6-45 22-52-8 14-8 30 0 52zM8 80c0-20-6-30-6-42 12 8 18 24 14 42z" fill="#1f8a84"/></svg></div></div>`}
 
 function cari(){
@@ -309,7 +324,7 @@ function list(){
  let map='';
  if(bulan){ for(let g=1;g<=20;g++){ map+=`<div class="cell ${occBulan.has(g)?'has':''} ${g===noGen?'sel':''}" style="display:flex;align-items:center;justify-content:center;font-size:11px;color:#fff">${g}</div>`; } }
  else { const occ=new Set(items.map(i=>i.lok).filter(l=>/^[A-Za-z]-\d\d-\d$/.test(l)).map(l=>l.slice(0,4))); const lokMatch2=(s.lok||'').match(/^([A-Za-z])-(\d+)-(\d+)$/); const ra2=lokMatch2?lokMatch2[1].toUpperCase():null, co2=lokMatch2?lokMatch2[2]:null; map='<i></i>'+[1,2,3,4,5,6].map(c=>`<i>${c}</i>`).join(''); 'ABCD'.split('').forEach(a=>{map+=`<i>${a}</i>`;for(let c=1;c<=6;c++)map+=`<div class="cell ${occ.has(a+'-0'+c)?'has':''} ${ra2===a&&+co2===c?'sel':''}"></div>`}); }
- $('#res').innerHTML=`<div class="grid"><div><h3>Hasil (${r.length})</h3>${r.map(i=>`<div class="row c ${i.kode===sel?'on':''}" onclick="sel='${i.kode}';list();document.getElementById('panelLokasi')?.scrollIntoView({behavior:'smooth',block:'center'});document.getElementById('panelLokasi')?.animate([{boxShadow:'0 0 0 0 rgba(248,215,101,0)'},{boxShadow:'0 0 0 6px rgba(248,215,101,.7)'},{boxShadow:'0 0 0 0 rgba(248,215,101,0)'}],{duration:700})">${fotoThumb(i)}<div><div class="n">${esc(i.nama)}</div><div class="k">${esc(i.kode)} - ${esc(i.kat)}</div></div><div><div class="k">Lokasi</div><div class="big">${esc(i.lok)}</div></div><div><div class="big">${i.stok} <small class="k">${esc(i.sat)}</small></div>${pill(i)}</div><button class="btn sm" style="width:100%" onclick="event.stopPropagation();lihatBarang('${i.kode}')">Lihat</button></div>`).join('')||'<div class="empty">Barang tidak ditemukan. Coba kata kunci lain.</div>'}</div><aside class="panel" id="panelLokasi"><small>Lokasi barang</small><div style="font-size:32px;font-weight:500">${esc(s.lok||'-')}</div><small>${s.lok?(bulan?`Bulan ${bulan} - ${tipe} ${noGen} (slot 1-20)`:esc(s.lok)):'Pilih barang dari daftar'}</small><div class="map" aria-label="Denah bulan" style="grid-template-columns:repeat(5,1fr)">${map}</div><small>${bulan?`Yang abu-abu = sudah terisi di ${bulan} ${tipe}. Yang kuning = yang kamu pilih. ${tipe==='PVH'?'PVH tidak dicampur ke General.':''}`:''}</small><small>${esc(s.nama||'')}</small><div style="font-weight:500">${s.stok??''} ${esc(s.sat||'')}</div>${s.foto?`<img src="${s.foto}" class="foto-big" alt="Foto ${esc(s.nama||'')}">`:(s.kode?`<div class="k" style="margin-top:10px">Belum ada foto. Upload di Daftar Barang / Barang Masuk.</div>`:'')}</aside></div>`}
+ $('#res').innerHTML=`<div class="grid"><div><h3>Hasil (${r.length})</h3>${r.map(i=>`<div class="row c ${i.kode===sel?'on':''}" onclick="sel=${esc(JSON.stringify(i.kode))};list();document.getElementById('panelLokasi')?.scrollIntoView({behavior:'smooth',block:'center'});document.getElementById('panelLokasi')?.animate([{boxShadow:'0 0 0 0 rgba(248,215,101,0)'},{boxShadow:'0 0 0 6px rgba(248,215,101,.7)'},{boxShadow:'0 0 0 0 rgba(248,215,101,0)'}],{duration:700})">${fotoThumb(i)}<div><div class="n">${esc(i.nama)}</div><div class="k">${esc(i.kode)} - ${esc(i.kat)}</div></div><div><div class="k">Lokasi</div><div class="big">${esc(i.lok)}</div></div><div><div class="big">${i.stok} <small class="k">${esc(i.sat)}</small></div>${pill(i)}</div><button class="btn sm" style="width:100%" onclick="event.stopPropagation();lihatBarang(${esc(JSON.stringify(i.kode))})">Lihat</button></div>`).join('')||'<div class="empty">Barang tidak ditemukan. Coba kata kunci lain.</div>'}</div><aside class="panel" id="panelLokasi"><small>Lokasi barang</small><div style="font-size:32px;font-weight:500">${esc(s.lok||'-')}</div><small>${s.lok?(bulan?`Bulan ${bulan} - ${tipe} ${noGen} (slot 1-20)`:esc(s.lok)):'Pilih barang dari daftar'}</small><div class="map" aria-label="Denah bulan" style="grid-template-columns:repeat(5,1fr)">${map}</div><small>${bulan?`Yang abu-abu = sudah terisi di ${bulan} ${tipe}. Yang kuning = yang kamu pilih. ${tipe==='PVH'?'PVH tidak dicampur ke General.':''}`:''}</small><small>${esc(s.nama||'')}</small><div style="font-weight:500">${s.stok??''} ${esc(s.sat||'')}</div>${s.foto?`<img src="${s.foto}" class="foto-big" alt="Foto ${esc(s.nama||'')}">`:(s.kode?`<div class="k" style="margin-top:10px">Belum ada foto. Upload di Daftar Barang / Barang Masuk.</div>`:'')}</aside></div>`}
 function daftar(){
  const dq=(q||'').toLowerCase();
  const filtered=items.filter(i=>!dq||(i.nama+' '+i.kode+' '+i.kat+' '+i.lok+' '+(i.buyer||'')+' '+(i.style||'')+' '+(i.color||'')).toLowerCase().includes(dq));
@@ -371,31 +386,37 @@ function updateColorInputs(){
 }
 function getColors(){return [...document.querySelectorAll('.color-input')].map(el=>el.value.trim()).filter(Boolean).join(', ')||'-';}
 function syncMasuk(){const k=$('#m1').value.trim().toUpperCase();const ex=find(k);if(ex){$('#m2').value=ex.nama;$('#m4').value=ex.buyer||'';$('#m5').value=ex.lok;$('#m6').value=ex.kat;if($('#m7'))$('#m7').value=(ex.style||'')==='-'?'':ex.style;const cols=(ex.color||'').split(',').map(s=>s.trim()).filter(Boolean);const cc=$('#mColorCount');if(cc){cc.value=String(Math.max(1,Math.min(6,cols.length||1)));}updateColorInputs();[...document.querySelectorAll('.color-input')].forEach((el,i)=>{el.value=cols[i]||'';});}}
-async function catatMasuk(){const k=$('#m1').value.trim().toUpperCase(),nama=$('#m2').value.trim(),n=Number($('#m3').value),sup=$('#m4').value.trim()||'-',lok=$('#m5').value.trim()||'Januari General 1',kat=$('#m6').value.trim()||'Garment',style=$('#m7')?.value.trim()||'-',color=getColors();if(!k)return toast('Isi kode sampel dulu');if(!Number.isFinite(n)||n<1)return toast('Jumlah bebas ditulis, minimal 1, bisa 2 / 3 / 4 / 5 pcs');const fotoUrl=pendingFotoMasuk?await uploadFotoKeFirebase(pendingFotoMasuk,k):'';const oleh=siapa();const ex=find(k);if(ex){ex.stok+=n;ex.oleh=oleh;ex.aksi='+'+n+' pcs';ex.tgl_ubah=tgl();ex.buyer=sup;if(style!=='-')ex.style=style;if(color!=='-')ex.color=color;if(fotoUrl)ex.foto=fotoUrl;toast('Stok '+ex.nama+' ditambah +'+n+' jadi '+ex.stok+' oleh '+oleh)}else{if(!nama)return toast('Kode baru, isi nama barang dulu');items.push({kode:k,nama,kat,sat:'pcs',lok,stok:n,min:0,foto:fotoUrl,oleh:oleh,aksi:'Baru +'+n+' pcs',tgl_ubah:tgl(),buyer:sup,style:style,color:color});toast('Sampel baru dibuat: '+nama+' stok '+n+' oleh '+oleh)}masuk.push({tgl:tgl(),kode:k,qty:n,sup,foto:fotoUrl,oleh:oleh});pendingFotoMasuk=null;saveData();toast('Barang masuk dicatat');masukV();}
+async function catatMasuk(){const k=$('#m1').value.trim().toUpperCase(),nama=$('#m2').value.trim(),n=Number($('#m3').value),sup=$('#m4').value.trim()||'-',lok=$('#m5').value.trim()||'Januari General 1',kat=$('#m6').value.trim()||'Garment',style=$('#m7')?.value.trim()||'-',color=getColors();if(!k)return toast('Isi kode sampel dulu');if(!Number.isFinite(n)||n<1)return toast('Jumlah bebas ditulis, minimal 1, bisa 2 / 3 / 4 / 5 pcs');const fotoUrl=pendingFotoMasuk?await uploadFotoKeFirebase(pendingFotoMasuk,k):'';const oleh=siapa();const ex=find(k);if(ex){(ex.stok+=n,addDelta(ex.kode,n));ex.oleh=oleh;ex.aksi='+'+n+' pcs';ex.tgl_ubah=tgl();ex.buyer=sup;if(style!=='-')ex.style=style;if(color!=='-')ex.color=color;if(fotoUrl)ex.foto=fotoUrl;toast('Stok '+ex.nama+' ditambah +'+n+' jadi '+ex.stok+' oleh '+oleh)}else{if(!nama)return toast('Kode baru, isi nama barang dulu');items.push({kode:k,nama,kat,sat:'pcs',lok,stok:n,min:0,foto:fotoUrl,oleh:oleh,aksi:'Baru +'+n+' pcs',tgl_ubah:tgl(),buyer:sup,style:style,color:color});toast('Sampel baru dibuat: '+nama+' stok '+n+' oleh '+oleh)}masuk.push({tgl:tgl(),kode:k,qty:n,sup,foto:fotoUrl,oleh:oleh});pendingFotoMasuk=null;saveData();toast('Barang masuk dicatat');masukV();}
 
 function pinjamV(){
  $('#main').innerHTML=head('Ambil & Kembali')+`<div class="form"><select id="p1">${opts()}</select><input id="p2" type="number" min="1" placeholder="Jumlah"><input id="p3" placeholder="Nama pengambil"><input id="p4" placeholder="Untuk apa? (fitting / foto / cek jahitan / kirim buyer)"><label style="display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--mute)">Janji kembali<input id="p5" type="date"></label></div><button class="btn" onclick="ambil()">Catat pengambilan</button>
- <h2>Catatan</h2>${pinjam.slice().reverse().map(p=>{const i=find(p.kode)||{kode:p.kode,nama:p.kode+' (dihapus)',sat:'pcs'};return `<div class="row">${fotoThumb(i)}<div><div class="n">${esc(i.nama)}</div><div class="k">${p.qty} ${esc(i.sat)} - ${esc(p.orang)}</div><div class="k">Untuk: ${esc(p.untuk||'-')} • Janji kembali: ${esc(p.janji||'-')}${p.st==='Diambil' && p.janji && new Date(p.janji) < new Date(new Date().toISOString().slice(0,10)) ? ` • <b style="color:#c0483d">TELAT ${(Math.floor((new Date(new Date().toISOString().slice(0,10))-new Date(p.janji))/86400000))} hari!</b>` : ''}</div><div class="k">Dicatat oleh: ${esc(p.oleh||'-')}${p.oleh_kembali?` • Dikembalikan oleh: ${esc(p.oleh_kembali)}`:''}</div></div><div class="k">${p.tgl}</div><div><span class="st ${p.st==='Diambil'?'low':'ok'}">${p.st}</span></div>${p.st==='Diambil'?`<button class="btn sm" onclick="kembali('${p.id}')">Kembalikan</button>`:'<span></span>'}</div>`}).join('')}`}
+ <h2>Catatan</h2>${pinjam.slice().reverse().map(p=>{const i=find(p.kode)||{kode:p.kode,nama:p.kode+' (dihapus)',sat:'pcs'};return `<div class="row">${fotoThumb(i)}<div><div class="n">${esc(i.nama)}</div><div class="k">${p.qty} ${esc(i.sat)} - ${esc(p.orang)}</div><div class="k">Untuk: ${esc(p.untuk||'-')} • Janji kembali: ${esc(p.janji||'-')}${p.st==='Diambil' && p.janji && new Date(p.janji) < new Date(new Date().toISOString().slice(0,10)) ? ` • <b style="color:#c0483d">TELAT ${(Math.floor((new Date(new Date().toISOString().slice(0,10))-new Date(p.janji))/86400000))} hari!</b>` : ''}</div><div class="k">Dicatat oleh: ${esc(p.oleh||'-')}${p.oleh_kembali?` • Dikembalikan oleh: ${esc(p.oleh_kembali)}`:''}</div></div><div class="k">${p.tgl}</div><div><span class="st ${p.st==='Diambil'?'low':'ok'}">${p.st}</span></div>${p.st==='Diambil'?`<button class="btn sm" onclick="kembali(${esc(JSON.stringify(p.id))})">Kembalikan</button>`:'<span></span>'}</div>`}).join('')}`}
 function ambil(){const k=$('#p1').value,n=+$('#p2').value,o=$('#p3').value.trim(),untuk=$('#p4')?.value.trim()||'-',janji=$('#p5')?.value||'',i=find(k);
  if(n<1||!o)return toast('Isi jumlah dan nama pengambil');if(!untuk||untuk==='-')return toast('Isi Untuk apa, contoh: fitting / foto');if(!janji)return toast('Isi Janji kembali tanggal berapa');if(i.stok<n)return toast('Stok tidak cukup, sisa '+i.stok);
- const olehAmbil=siapa(); i.stok-=n;i.oleh=olehAmbil;i.aksi='-'+n+' pcs (diambil '+o+')';i.tgl_ubah=tgl();pinjam.push({id:Date.now().toString(36)+Math.random().toString(36).slice(2,6),kode:k,qty:n,orang:o,untuk:untuk,janji:janji,tgl:tgl(),st:'Diambil',oleh:olehAmbil});saveData();toast('Pengambilan dicatat oleh '+olehAmbil);pinjamV()}
-function kembali(id){const p=pinjam.find(x=>x.id===id);if(!p)return toast('Catatan tidak ditemukan');if(p.st!=='Diambil')return toast('Barang sudah dikembalikan');p.st='Dikembalikan';p.oleh_kembali=siapa();const it=find(p.kode);if(it){it.stok+=p.qty;it.oleh=siapa();it.aksi='+'+p.qty+' pcs (dikembalikan)';it.tgl_ubah=tgl();toast('Barang dikembalikan ke rak '+it.lok+' oleh '+siapa())}else{toast('Barang dikembalikan')}saveData();pinjamV()}
+ const olehAmbil=siapa(); (i.stok-=n,addDelta(i.kode,-n));i.oleh=olehAmbil;i.aksi='-'+n+' pcs (diambil '+o+')';i.tgl_ubah=tgl();pinjam.push({id:Date.now().toString(36)+Math.random().toString(36).slice(2,6),kode:k,qty:n,orang:o,untuk:untuk,janji:janji,tgl:tgl(),st:'Diambil',oleh:olehAmbil});saveData();toast('Pengambilan dicatat oleh '+olehAmbil);pinjamV()}
+function kembali(id){const p=pinjam.find(x=>x.id===id);if(!p)return toast('Catatan tidak ditemukan');if(p.st!=='Diambil')return toast('Barang sudah dikembalikan');p.st='Dikembalikan';p.oleh_kembali=siapa();const it=find(p.kode);if(it){(it.stok+=p.qty,addDelta(it.kode,p.qty));it.oleh=siapa();it.aksi='+'+p.qty+' pcs (dikembalikan)';it.tgl_ubah=tgl();toast('Barang dikembalikan ke rak '+it.lok+' oleh '+siapa())}else{toast('Barang dikembalikan')}saveData();pinjamV()}
 
 $('#gs').addEventListener('keydown',e=>{if(e.key==='Enter'){q=e.target.value;if(view==='daftar'){daftar()}else{kat='';stf='';go('cari')}}});
 $('#gs').addEventListener('input',e=>{q=e.target.value;if(view==='cari'){const qi=$('#q');if(qi&&qi.value!==q)qi.value=q;list()}else if(view==='daftar'){daftar()}});
-function resetPIN(){if(!confirm('Reset PIN di perangkat ini? Nanti kamu bisa bikin PIN baru. Data barang tidak hilang, cuma PIN-nya aja yang dihapus.'))return;try{localStorage.removeItem('gk_pin_hash');localStorage.removeItem('gk_session');}catch(e){}$('#err').textContent='PIN sudah di-reset. Sekarang isi PIN baru (bebas, contoh 123456) lalu klik Masuk.';$('#pw').value='';$('#pw').focus();toast('PIN di-reset, silakan bikin PIN baru');}
+function resetPIN(){if(!confirm('Reset PIN di perangkat ini? Nanti kamu bisa bikin PIN baru. Data barang tidak hilang, cuma PIN-nya aja yang dihapus.'))return;try{localStorage.removeItem('gk_pin_hash');localStorage.removeItem('gk_session');}catch(e){}try{window.fbAuth&&window.fbAuth.signOut()}catch(e){}$('#err').textContent='PIN sudah di-reset. Sekarang isi PIN baru (bebas, contoh 123456) lalu klik Masuk.';$('#pw').value='';$('#pw').focus();toast('PIN di-reset, silakan bikin PIN baru');}
 async function hashPIN(pin){const buf=await crypto.subtle.digest('SHA-256',new TextEncoder().encode('gudang-kita:'+pin));return [...new Uint8Array(buf)].map(b=>b.toString(16).padStart(2,'0')).join('')}
+const mailOf=u=>u.includes('@')?u:(u.toLowerCase().replace(/[^a-z0-9._-]/g,'')||'admin')+'@gudang.app';
+async function cloudLogin(u,pin){if(!window.fbAuth)return 'skip';try{await window.fbAuth.signInWithEmailAndPassword(mailOf(u),pin);return 'ok'}catch(e){
+ if(e.code==='auth/network-request-failed')return 'offline';if(e.code==='auth/operation-not-allowed'||e.code==='auth/configuration-not-found')return 'skip';return 'bad'}}
 async function doLogin(){
  const pin=$('#pw').value.trim();if(!pin){$('#err').textContent='Isi PIN dulu.';return}
  const stored=(()=>{try{return localStorage.getItem('gk_pin_hash')}catch(e){return null}})();
  const h=await hashPIN(pin);
- if(stored){if(h!==stored){$('#err').textContent='PIN salah. Coba lagi.';$('#pw').select();return}}else{try{localStorage.setItem('gk_pin_hash',h)}catch(e){}toast('PIN baru dibuat, ingat PIN ini untuk login berikutnya');}
+ const cr=await cloudLogin($('#us').value.trim()||'Admin Gudang',pin);
+ if(cr==='bad'){$('#err').textContent='Nama atau PIN salah (akun cloud belum dibuat?)';$('#pw').select();return}
+ if(cr==='ok'){try{localStorage.setItem('gk_pin_hash',h)}catch(e){}}
+ else if(stored){if(h!==stored){$('#err').textContent='PIN salah. Coba lagi.';$('#pw').select();return}}else{try{localStorage.setItem('gk_pin_hash',h)}catch(e){}toast('PIN baru dibuat (mode lokal), ingat PIN ini');}
  const u=$('#us').value.trim()||'Admin Gudang';
  try{$('#rm').checked?localStorage.setItem('gk_user',u):localStorage.removeItem('gk_user')}catch(e){}
  try{localStorage.setItem('gk_session',JSON.stringify({u:u,t:Date.now()}))}catch(e){}
  $('#who').textContent=u;$('#ava').textContent=u.slice(0,2).toUpperCase();
- $('#login').hidden=true;$('#app').inert=false;$('#pw').value='';$('#err').textContent='';go('dash')}
-function doLogout(){try{localStorage.removeItem('gk_session')}catch(e){}$('#login').hidden=false;$('#app').inert=true;$('#pw').focus()}
+ $('#login').hidden=true;$('#app').inert=false;$('#pw').value='';$('#err').textContent='';startSync();go('dash')}
+function doLogout(){try{localStorage.removeItem('gk_session')}catch(e){}try{SYNC.unsubs.forEach(f=>f());SYNC.unsubs=[];SYNC.started=false;SYNC.ready=false;SYNC.sent={};window.fbAuth&&window.fbAuth.signOut()}catch(e){}$('#login').hidden=false;$('#app').inert=true;$('#pw').focus()}
 $('#pw').addEventListener('keydown',e=>{if(e.key==='Enter')doLogin()});
 $('#us').addEventListener('keydown',e=>{if(e.key==='Enter')$('#pw').focus()});
 try{const u=localStorage.getItem('gk_user');if(u){$('#us').value=u;$('#rm').checked=true}}catch(e){}
@@ -418,4 +439,5 @@ try{
     $('#us').focus();
   }
 }catch(e){ $('#us').focus(); }
+if(window.fbAuth)window.fbAuth.onAuthStateChanged(u=>{if(u)startSync();else setSync('Mode lokal: belum masuk akun cloud',1)});
 </script></body></html>
