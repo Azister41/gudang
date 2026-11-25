@@ -302,7 +302,7 @@ function riwayatV(){
   $('#main').innerHTML=head('Riwayat 14 Hari - Aktivitas Gudang')+
   `<div class="k" style="margin:0 4px 12px">Semua aktivitas 14 hari terakhir: barang masuk, ambil, dan kembali. Diurutkan dari yang paling baru.</div>`+
   `<div class="bar2"><span class="pill"><b>${cMasuk}</b> pcs masuk</span><span class="pill"><b>${cAmbil}</b> pcs diambil</span><span class="pill"><b>${cKembali}</b> pcs dikembalikan</span><span class="pill"><b>${list.length}</b> aktivitas</span></div>`+
-  `<div style="display:flex;gap:8px;flex-wrap:wrap;margin:10px 4px">${btn('Semua')}${btn('Masuk')}${btn('Ambil')}${btn('Kembali')}</div>`+
+  `<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:10px 4px;background:var(--pill);padding:10px 12px;border-radius:18px"><b>Export:</b><select onchange="exportJumlah=this.value" style="background:#fff;border-radius:24px;padding:8px 14px"><option value="Semua">Semua</option><option value="10">10</option><option value="20">20</option><option value="30">30</option></select><button class="btn sm" style="border-radius:24px;padding:8px 18px" onclick="exportRiwayat()">Export Riwayat Excel</button></div>`+
   (fList.length ? fList.map(x=>`<div class="row">${badge(x.tipe)}<div><div class="n">${esc(x.nama)}</div><div class="k">${esc(x.kode)} - ${x.qty} pcs</div><div class="k">${esc(x.ket)}</div><div class="k">Oleh: ${esc(x.oleh)}</div></div><div class="k" style="text-align:right">${esc(x.tgl)}</div></div>`).join('') : '<div class="empty">Belum ada aktivitas dalam 14 hari terakhir.</div>')
 }
 
@@ -359,11 +359,58 @@ function list(){
  if(bulan){ for(let g=1;g<=20;g++){ map+=`<div class="cell ${occBulan.has(g)?'has':''} ${g===noGen?'sel':''}" style="display:flex;align-items:center;justify-content:center;font-size:11px;color:#fff">${g}</div>`; } }
  else { const occ=new Set(items.map(i=>i.lok).filter(l=>/^[A-Za-z]-\d\d-\d$/.test(l)).map(l=>l.slice(0,4))); const lokMatch2=(s.lok||'').match(/^([A-Za-z])-(\d+)-(\d+)$/); const ra2=lokMatch2?lokMatch2[1].toUpperCase():null, co2=lokMatch2?lokMatch2[2]:null; map='<i></i>'+[1,2,3,4,5,6].map(c=>`<i>${c}</i>`).join(''); 'ABCD'.split('').forEach(a=>{map+=`<i>${a}</i>`;for(let c=1;c<=6;c++)map+=`<div class="cell ${occ.has(a+'-0'+c)?'has':''} ${ra2===a&&+co2===c?'sel':''}"></div>`}); }
  $('#res').innerHTML=`<div class="grid"><div><h3>Hasil (${r.length})</h3>${r.map(i=>`<div class="row c ${i.kode===sel?'on':''}" onclick="sel=${esc(JSON.stringify(i.kode))};list();document.getElementById('panelLokasi')?.scrollIntoView({behavior:'smooth',block:'center'});document.getElementById('panelLokasi')?.animate([{boxShadow:'0 0 0 0 rgba(248,215,101,0)'},{boxShadow:'0 0 0 6px rgba(248,215,101,.7)'},{boxShadow:'0 0 0 0 rgba(248,215,101,0)'}],{duration:700})">${fotoThumb(i)}<div><div class="n">${esc(i.nama)}</div><div class="k">${esc(i.kode)} - ${esc(i.kat)}</div></div><div><div class="k">Lokasi</div><div class="big">${esc(i.lok)}</div></div><div><div class="big">${i.stok} <small class="k">${esc(i.sat)}</small></div>${pill(i)}</div><button class="btn sm" style="width:100%" onclick="event.stopPropagation();lihatBarang(${esc(JSON.stringify(i.kode))})">Lihat</button></div>`).join('')||'<div class="empty">Barang tidak ditemukan. Coba kata kunci lain.</div>'}</div><aside class="panel" id="panelLokasi"><small>Lokasi barang</small><div style="font-size:32px;font-weight:500">${esc(s.lok||'-')}</div><small>${s.lok?(bulan?`Bulan ${bulan} - ${tipe} ${noGen} (slot 1-20)`:esc(s.lok)):'Pilih barang dari daftar'}</small><div class="map" aria-label="Denah bulan" style="grid-template-columns:repeat(5,1fr)">${map}</div><small>${bulan?`Yang abu-abu = sudah terisi di ${bulan} ${tipe}. Yang kuning = yang kamu pilih. ${tipe==='PVH'?'PVH tidak dicampur ke General.':''}`:''}</small><small>${esc(s.nama||'')}</small><div style="font-weight:500">${s.stok??''} ${esc(s.sat||'')}</div>${s.foto?`<img src="${s.foto}" class="foto-big" alt="Foto ${esc(s.nama||'')}">`:(s.kode?`<div class="k" style="margin-top:10px">Belum ada foto. Upload di Daftar Barang / Barang Masuk.</div>`:'')}</aside></div>`}
+
+let exportPilih = new Set();
+let exportJumlah = 'Semua';
+function downloadCSV(namaFile, header, rows){
+  const escCSV = v => '"' + String(v ?? '').replace(/"/g,'""') + '"';
+  const csv = [header.map(escCSV).join(','), ...rows.map(r=>r.map(escCSV).join(','))].join('\n');
+  const blob = new Blob(['\ufeff'+csv], {type:'text/csv'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = namaFile; a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href), 1000);
+}
+function toggleExport(kode, el){
+  if(el.checked) exportPilih.add(kode); else exportPilih.delete(kode);
+  const info = document.getElementById('exportInfo');
+  if(info) info.textContent = exportPilih.size ? exportPilih.size + ' dipilih' : '';
+}
+function exportDaftar(){
+  let data = [];
+  // B = kalau ada yang dicentang, pakai yang dicentang
+  if(exportPilih.size){ data = items.filter(i=>exportPilih.has(i.kode)); }
+  // A = kalau tidak ada yang dicentang, pakai yang lagi tampil / difilter
+  else { const dq=(q||'').toLowerCase(); data = items.filter(i=>!dq||(i.nama+' '+i.kode+' '+i.kat+' '+i.lok+' '+(i.buyer||'')+' '+(i.style||'')+' '+(i.color||'')).toLowerCase().includes(dq)); }
+  // C = potong jumlahnya
+  if(exportJumlah!=='Semua'){ data = data.slice(0, Number(exportJumlah)); }
+  if(!data.length) return toast('Tidak ada data untuk di-export');
+  const header = ['Kode','Nama','Buyer','Style','Color','Kategori','Lokasi','Stok','Diubah Oleh'];
+  const rows = data.map(i=>[i.kode, i.nama, i.buyer||'', i.style||'', i.color||'', i.kat, i.lok, i.stok, i.oleh||'']);
+  const tglFile = new Date().toISOString().slice(0,10);
+  downloadCSV('Gudang_'+tglFile+'.csv', header, rows);
+  toast('Export '+data.length+' barang berhasil');
+}
+function exportRiwayat(){
+  const today=new Date(); today.setHours(0,0,0,0);
+  const batas=new Date(today); batas.setDate(batas.getDate()-13);
+  const list=[];
+  (masuk||[]).forEach(m=>{ const d=parseTglId(m.tgl); if(!d||d<batas) return; const it=find(m.kode)||{nama:m.kode}; list.push({tgl:m.tgl,tipe:'Masuk',kode:m.kode,nama:it.nama,qty:m.qty,oleh:m.oleh||'-',ket:'Buyer: '+(m.sup||'-')}); });
+  (pinjam||[]).forEach(p=>{ const it=find(p.kode)||{nama:p.kode}; const dA=parseTglId(p.tgl); if(dA&&dA>=batas) list.push({tgl:p.tgl,tipe:'Ambil',kode:p.kode,nama:it.nama,qty:p.qty,oleh:p.oleh||'-',ket:'Diambil oleh '+(p.orang||'-')+' - '+(p.untuk||'-')}); if(p.st==='Dikembalikan'){ const dK=parseTglId(p.tgl_kembali||p.tgl); if(dK&&dK>=batas) list.push({tgl:p.tgl_kembali||p.tgl,tipe:'Kembali',kode:p.kode,nama:it.nama,qty:p.qty,oleh:p.oleh_kembali||p.oleh||'-',ket:'Dikembalikan oleh '+(p.oleh_kembali||p.oleh||'-')}); } });
+  list.sort((a,b)=>parseTglId(b.tgl)-parseTglId(a.tgl));
+  let data = riwayatFilter==='Semua' ? list : list.filter(x=>x.tipe===riwayatFilter);
+  if(exportJumlah!=='Semua'){ data = data.slice(0, Number(exportJumlah)); }
+  if(!data.length) return toast('Tidak ada riwayat untuk di-export');
+  const header = ['Tanggal','Tipe','Kode','Nama','Qty','Keterangan','Oleh'];
+  const rows = data.map(x=>[x.tgl, x.tipe, x.kode, x.nama, x.qty, x.ket, x.oleh]);
+  downloadCSV('Riwayat_14Hari_'+new Date().toISOString().slice(0,10)+'.csv', header, rows);
+  toast('Export '+data.length+' riwayat berhasil');
+}
 function daftar(){
  const dq=(q||'').toLowerCase();
  const filtered=items.filter(i=>!dq||(i.nama+' '+i.kode+' '+i.kat+' '+i.lok+' '+(i.buyer||'')+' '+(i.style||'')+' '+(i.color||'')).toLowerCase().includes(dq));
- $('#main').innerHTML=head('Daftar Sampel',`<button class="btn" onclick="go('masuk')">+ Tambah di Barang Masuk</button>`)+`<div class="k" style="margin:0 4px 12px">Di sini cuma list aja. Mau tambah barang baru atau tambah stok, pakai menu Barang Masuk.</div><div class="bar2"><input id="qd" placeholder="Cari kode / nama di Daftar Sampel..." value="${esc(q)}" aria-label="Cari di Daftar Sampel"><button class="btn" onclick="q='';const g=$('#gs');if(g)g.value='';daftar()">Hapus cari</button></div>
- <h2>Semua barang (${filtered.length} dari ${items.length})</h2><div class="wrap"><table><tr><th>Foto</th><th>Kode</th><th>Nama</th><th>Buyer</th><th>Style</th><th>Color</th><th>Kategori</th><th>Lokasi</th><th>Stok</th><th>Status</th><th>Diubah Oleh</th><th>Aksi</th></tr>${filtered.map(i=>{const idx=items.indexOf(i);return `<tr><td>${fotoThumb(i)}</td><td>${esc(i.kode)}</td><td>${esc(i.nama)}</td><td>${esc(i.buyer||i.nama)}</td><td>${esc(i.style||'-')}</td><td>${(i.color||'-').split(',').map(c=>`<span style='display:inline-block;background:var(--pill);border-radius:12px;padding:2px 8px;margin:1px;font-size:11px'>${esc(c.trim())}</span>`).join(' ')}</td><td>${esc(i.kat)}</td><td>${esc(i.lok)}</td><td>${i.stok} ${esc(i.sat)}</td><td>${pill(i)}</td><td><div style="font-weight:500">${esc(i.oleh||'-')}</div><div class="k">${esc(i.aksi||'')}</div><div class="k">${esc(i.tgl_ubah||'')}</div></td><td><button class=\"btn sm\" style=\"background:#fde3e1;color:#c0483d\" onclick=\"hapusBarang(${idx})\">Hapus</button></td></tr>`}).join('')}</table></div>${filtered.length?'':'<div class="empty">Tidak ketemu. Coba kata kunci lain atau klik Hapus cari.</div>'}`;
+ $('#main').innerHTML=head('Daftar Sampel',`<button class="btn" onclick="go('masuk')">+ Tambah di Barang Masuk</button>`)+`<div class="k" style="margin:0 4px 12px">Di sini cuma list aja. Mau tambah barang baru atau tambah stok, pakai menu Barang Masuk.</div><div class="bar2"><input id="qd" placeholder="Cari kode / nama di Daftar Sampel..." value="${esc(q)}" aria-label="Cari di Daftar Sampel"><button class="btn" onclick="q='';const g=$('#gs');if(g)g.value='';daftar()">Hapus cari</button></div>`+
+ `<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:10px 4px;background:var(--pill);padding:10px 12px;border-radius:18px"><b>Export:</b><select id="exportJumlah" onchange="exportJumlah=this.value" style="background:#fff;border-radius:24px;padding:8px 14px"><option value="Semua">Semua</option><option value="10">10</option><option value="20">20</option><option value="30">30</option></select><span id="exportInfo" class="k"></span><button class="btn sm" style="border-radius:24px;padding:8px 18px" onclick="exportDaftar()">Export Excel</button><button class="btn sm" style="background:#fff;color:var(--ink);border:1px solid #ddd;border-radius:24px;padding:8px 18px" onclick="exportPilih.clear();daftar()">Bersihkan Centang</button></div>`+
+ `<h2>Semua barang (${filtered.length} dari ${items.length})</h2><div class="wrap"><table><tr><th>✓</th><th>Foto</th><th>Kode</th><th>Nama</th><th>Buyer</th><th>Style</th><th>Color</th><th>Kategori</th><th>Lokasi</th><th>Stok</th><th>Status</th><th>Diubah Oleh</th><th>Aksi</th></tr>${filtered.map(i=>{const idx=items.indexOf(i);return `<tr><td><input type="checkbox" ${exportPilih.has(i.kode)?'checked':''} onchange="toggleExport('${i.kode}', this)" style="width:18px;height:18px"></td><td>${fotoThumb(i)}</td><td>${esc(i.kode)}</td><td>${esc(i.nama)}</td><td>${esc(i.buyer||i.nama)}</td><td>${esc(i.style||'-')}</td><td>${(i.color||'-').split(',').map(c=>`<span style='display:inline-block;background:var(--pill);border-radius:12px;padding:2px 8px;margin:1px;font-size:11px'>${esc(c.trim())}</span>`).join(' ')}</td><td>${esc(i.kat)}</td><td>${esc(i.lok)}</td><td>${i.stok} ${esc(i.sat)}</td><td>${pill(i)}</td><td><div style="font-weight:500">${esc(i.oleh||'-')}</div><div class="k">${esc(i.aksi||'')}</div><div class="k">${esc(i.tgl_ubah||'')}</div></td><td><button class="btn sm" style="background:#fde3e1;color:#c0483d" onclick="hapusBarang(${idx})">Hapus</button></td></tr>`}).join('')}</table></div>${filtered.length?'':'<div class="empty">Tidak ketemu. Coba kata kunci lain atau klik Hapus cari.</div>'}`;
  const qd=$('#qd');
  if(qd){
   qd.oninput=e=>{
