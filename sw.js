@@ -1,11 +1,35 @@
-const CACHE='gudang-v3';
-const FILES=['./','./index.html','./manifest.json','./icon-192.png','./icon-512.png'];
-self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE).then(c=>Promise.all(FILES.map(f=>c.add(f).catch(()=>{})))).then(()=>self.skipWaiting()))});
-self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim()))});
-// Network-first untuk file sendiri (selalu dapat versi terbaru); cache hanya dipakai saat offline.
-self.addEventListener('fetch',e=>{
-  const r=e.request,u=new URL(r.url);
-  if(r.method!=='GET'||u.origin!==location.origin)return;
-  e.respondWith(fetch(r).then(res=>{if(res.ok){const c=res.clone();caches.open(CACHE).then(x=>x.put(r,c))}return res})
-    .catch(()=>caches.match(r).then(h=>h||caches.match('./index.html'))));
+// Gudang PWA - service worker
+const CACHE = 'gudang-v1';
+const CORE = ['./', './index.html', './manifest.json', './icon-192.png', './icon-512.png'];
+
+self.addEventListener('install', (e) => {
+  self.skipWaiting();
+  e.waitUntil(
+    caches.open(CACHE).then((c) => c.addAll(CORE)).catch(()=>{})
+  );
+});
+
+self.addEventListener('activate', (e) => {
+  e.waitUntil(
+    caches.keys().then((keys) => Promise.all(keys.map((k) => k !== CACHE ? caches.delete(k) : Promise.resolve()))).then(() => self.clients.claim())
+  );
+});
+
+self.addEventListener('fetch', (e) => {
+  if (e.request.method !== 'GET') return;
+  // Biarin request Firebase / Google Fonts lewat langsung, jangan di-cache SW
+  if (e.request.url.includes('firebase') || e.request.url.includes('googleapis') || e.request.url.includes('gstatic')) {
+    return;
+  }
+  e.respondWith(
+    caches.match(e.request).then((cached) => {
+      return cached || fetch(e.request).then((resp) => {
+        if (resp && resp.status === 200 && e.request.url.startsWith(self.location.origin)) {
+          const copy = resp.clone();
+          caches.open(CACHE).then((c) => c.put(e.request, copy));
+        }
+        return resp;
+      }).catch(() => caches.match('./index.html'));
+    })
+  );
 });
