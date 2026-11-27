@@ -36,6 +36,13 @@ main{background:var(--card);border-radius:26px;padding:20px 28px 28px;min-width:
 .me{display:flex;gap:10px;align-items:center;margin-left:auto;font-weight:500}
 .ava{width:34px;height:34px;border-radius:50%;background:var(--teal);color:#fff;display:grid;place-items:center;font-size:12px;font-weight:600}
 .bell{width:20px;height:20px;stroke:var(--ink);fill:none;stroke-width:1.8}
+.bell-wrap{position:relative;display:grid;place-items:center;width:36px;height:36px;border-radius:50%;cursor:pointer;background:transparent}
+.bell-wrap:hover{background:var(--pill)}
+.notif-badge{position:absolute;top:1px;right:1px;min-width:18px;height:18px;padding:0 4px;border-radius:999px;background:#c0483d;color:#fff;font-size:10px;font-weight:700;display:none;place-items:center;line-height:1;border:2px solid var(--card)}
+.notif-panel{position:absolute;top:42px;right:0;width:min(340px,88vw);max-height:70vh;overflow:auto;background:var(--card);color:var(--ink);border-radius:18px;box-shadow:0 20px 50px -12px rgba(0,0,0,.35);border:1px solid var(--line);display:none;z-index:50;padding:12px}
+.notif-panel.on{display:block}
+.notif-item{display:grid;grid-template-columns:32px 1fr;gap:10px;padding:10px 8px;border-radius:12px}
+.notif-item:hover{background:var(--pill)}
 h1{font-size:28px;font-weight:500;margin:0}h3{margin:0 0 10px;font-size:19px;font-weight:500}
 .head{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:18px}
 .pill,input,select{background:var(--pill);color:var(--ink);border:0;border-radius:24px;padding:11px 18px;font:500 13px Outfit,system-ui,sans-serif;min-width:0}
@@ -112,7 +119,7 @@ h2{font-size:17px;font-weight:500;margin:24px 4px 10px}
 </aside>
 <main>
  <div class="top"><label class="s"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></svg><input id="gs" placeholder="Cari barang..." aria-label="Cari barang"></label>
- <div class="me"><button id="impBtn" onclick="imporLama()" style="all:unset;cursor:pointer;font-size:11px;color:var(--teal);text-decoration:underline;margin-right:10px">Impor data lama</button><span id="syncst" style="font-size:11px;color:var(--mute);margin-right:10px"></span><span id="who">Admin Gudang</span><span class="ava" id="ava">AG</span><svg class="bell" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 17V11a6 6 0 0112 0v6l2 2H4zM10 21h4"/></svg></div></div>
+ <div class="me"><button id="impBtn" onclick="imporLama()" style="all:unset;cursor:pointer;font-size:11px;color:var(--teal);text-decoration:underline;margin-right:10px">Impor data lama</button><span id="syncst" style="font-size:11px;color:var(--mute);margin-right:10px"></span><span id="who">Admin Gudang</span><span class="ava" id="ava">AG</span><div class="bell-wrap" id="bellWrap" onclick="toggleNotif(event)" title="Notifikasi"><svg class="bell" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 17V11a6 6 0 0112 0v6l2 2H4zM10 21h4"/></svg><span class="notif-badge" id="notifBadge">0</span><div class="notif-panel" id="notifPanel" onclick="event.stopPropagation()"></div></div></div></div>
  <div id="main"></div>
 </main>
 </div>
@@ -127,7 +134,7 @@ h2{font-size:17px;font-weight:500;margin:24px 4px 10px}
  <button class="btn big" onclick="doLogin()">Masuk</button><div class="k" style="font-size:11px">Masuk dengan nama dan PIN yang didaftarkan admin (akun Firebase). Nama tanpa spasi, mis. Azis.<br>Versi 2: login cloud + sinkron realtime</div>
  <button type="button" style="all:unset;cursor:pointer;color:var(--mute);font-size:11px;text-align:center;text-decoration:underline" onclick="resetPIN()">Lupa PIN? Minta admin reset password akunmu di Firebase (tombol ini hanya mereset PIN lokal HP ini)</button>
 </div><div class="lpic">Gudang</div></div></div>
-<div id="toast" role="status"></div><div id="lihatModal" class="lihat-overlay" onclick="if(event.target===this)tutupLihat()"></div><div id="editModal" class="lihat-overlay" onclick="if(event.target===this)tutupEdit()"></div>
+<div id="toast" role="status"></div><div id="lihatModal" class="lihat-overlay" onclick="if(event.target===this)tutupLihat()"></div><div id="editModal" class="lihat-overlay" onclick="if(event.target===this)tutupEdit()"></div><div id="konflikModal" class="lihat-overlay" onclick="if(event.target===this)tutupKonflik()"></div>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
@@ -169,13 +176,79 @@ function siapa(){try{const w=$('#who')?.textContent?.trim(); if(w && w!=='Admin 
 const DATA_KEY='gk_data_v5';
 function saveData(){
   try{localStorage.setItem(DATA_KEY,JSON.stringify({items,masuk,pinjam}))}catch(e){}
+  try{if(typeof updateNotifBadge==='function')updateNotifBadge();}catch(e){}
   pushCloud();
 }
 // === SINKRON CLOUD: 1 dokumen per barang/catatan, stok lewat increment, realtime antar perangkat ===
-const SYNC={sent:{},delta:{},busy:false,again:false,ready:false,started:false,unsubs:[]};
+const SYNC={sent:{},delta:{},busy:false,again:false,ready:false,started:false,unsubs:[],conflicts:{}};
 const sj=o=>JSON.stringify(o,Object.keys(o).sort()),sid=s=>String(s).replace(/[^A-Za-z0-9_-]/g,'_');
 function addDelta(k,n){SYNC.delta[k]=(SYNC.delta[k]||0)+n}
 function setSync(t,bad){const e=document.getElementById('syncst');if(e){e.textContent=t;e.style.color=bad?'#d9534f':''}}
+// === PENGAMAN TABRAKAN EDIT (konflik) ===
+// Kalau 2 orang edit SGR yang sama, yang terakhir sync yang menang di Firestore.
+// Pengaman ini: sebelum Simpan, cek dulu ke server apakah SGR-nya sudah diubah orang lain
+// sejak kamu buka edit. Kalau sudah, muncul peringatan, tidak langsung ketimpa diam-diam.
+let editBase=null, pendingEdit=null, konflikInfo=null;
+function fmtWaktuKonflik(ms){if(!ms)return '-';try{return new Date(ms).toLocaleString('id-ID',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'});}catch(e){return '-';}}
+function bumpVersi(it){it.v=(it.v||0)+1;it.updatedAt=Date.now();}
+function salinBarang(it){return {kode:it.kode,lok:it.lok,buyer:it.buyer||'',color:it.color||'',kat:it.kat||'',stok:it.stok,oleh:it.oleh||'',aksi:it.aksi||'',tgl_ubah:it.tgl_ubah||'',v:it.v||0,updatedAt:it.updatedAt||0};}
+async function cekKonflikServer(kode, base){
+  if(!window.fbDb||!window.fbAuth||!window.fbAuth.currentUser) return null;
+  if(!base) return null;
+  try{
+    const doc=await window.fbDb.collection('gudang_barang').doc(sid(kode)).get();
+    if(!doc.exists) return null;
+    const srv=doc.data(); if(!srv) return null;
+    const baseT=base.updatedAt||0, srvT=srv.updatedAt||0;
+    if(srvT<=baseT) return null;
+    if(srv.oleh===siapa()) return null;
+    const beda = srv.lok!==base.lok || (srv.buyer||'')!==(base.buyer||'') || (srv.color||'')!==(base.color||'') || (srv.kat||'')!==(base.kat||'') || srv.stok!==base.stok;
+    if(!beda) return null;
+    return srv;
+  }catch(e){ return null; }
+}
+function tampilKonflik(srv, milikku, mode){
+  konflikInfo={srv, milikku, mode};
+  const m=$('#konflikModal');
+  const beda=[];
+  if(srv.lok!==milikku.lok) beda.push(`Lokasi: <b>${esc(milikku.lok||'-')}</b> (punyamu) vs <b>${esc(srv.lok||'-')}</b> (punya ${esc(srv.oleh||'-')})`);
+  if((srv.buyer||'')!==(milikku.buyer||'')) beda.push(`Buyer: <b>${esc(milikku.buyer||'-')}</b> vs <b>${esc(srv.buyer||'-')}</b>`);
+  if((srv.color||'')!==(milikku.color||'')) beda.push(`Color: <b>${esc(milikku.color||'-')}</b> vs <b>${esc(srv.color||'-')}</b>`);
+  if(srv.stok!==milikku.stok) beda.push(`Stok: <b>${milikku.stok}</b> (hasil editmu) vs <b>${srv.stok}</b> (di server sekarang)`);
+  if(!beda.length) beda.push('Isinya beda dengan yang kamu buka tadi.');
+  const judul = mode==='edit' ? 'SGR ini baru diubah orang lain' : mode==='ambil' ? 'Stok SGR ini baru berubah' : 'SGR ini baru diubah orang lain';
+  m.innerHTML=`<div class="lihat-card"><div style="display:flex;justify-content:space-between;align-items:start;gap:12px"><div><div class="k" style="color:#c0483d;font-weight:700">⚠️ ${judul}</div><div style="font-size:20px;font-weight:600">${esc(milikku.kode)}</div><div class="k">Diubah oleh <b>${esc(srv.oleh||'-')}</b> • ${fmtWaktuKonflik(srv.updatedAt)} • ${esc(srv.aksi||'')}</div></div><button class="btn sm" style="background:var(--pill);color:var(--ink)" onclick="tutupKonflik()">Tutup ✕</button></div><div class="k" style="margin-top:12px">Kamu buka datanya tadi, tapi sebelum kamu pencet Simpan, temanmu sudah nyimpan duluan. Kalau kamu tetap Simpan, editannya dia ketimpa dan hilang.</div><div style="background:#fff3cd;border-radius:14px;padding:12px 14px;margin-top:10px;display:grid;gap:6px;font-size:13px">${beda.map(b=>`<div>• ${b}</div>`).join('')}</div><div style="display:grid;gap:8px;margin-top:14px"><button class="btn" style="width:100%" onclick="muatDataBaru()">Lihat data baru (buang editku)</button><button class="btn" style="width:100%;background:#c0483d" onclick="paksaTimpa()">Tetap timpa (editku yang menang)</button><button class="btn lihat-close" onclick="tutupKonflik()">Batal, balik ke edit</button></div></div>`;
+  m.classList.add('on');
+}
+function tutupKonflik(){const m=$('#konflikModal'); if(m){m.classList.remove('on'); m.innerHTML='';} konflikInfo=null;}
+async function paksaTimpa(){
+  if(!konflikInfo) return;
+  const mode=konflikInfo.mode; const pend=pendingEdit;
+  tutupKonflik();
+  if(mode==='edit' && pend){ await simpanEditPaksa(pend); pendingEdit=null; }
+  else if(mode==='ambil' && pend){ await ambilPaksa(pend); pendingEdit=null; }
+  else if(mode==='masuk' && pend){ await catatMasukPaksa(pend); pendingEdit=null; }
+}
+function muatDataBaru(){
+  if(!konflikInfo) return;
+  const srv=konflikInfo.srv, mode=konflikInfo.mode;
+  const it=find(srv.kode);
+  if(it){ Object.assign(it, srv); try{localStorage.setItem(DATA_KEY, JSON.stringify({items,masuk,pinjam}));}catch(e){} }
+  tutupKonflik(); pendingEdit=null;
+  if(mode==='edit'){
+    const idx=items.findIndex(x=>x.kode===srv.kode);
+    if(idx>=0) editBarang(idx); else { toast('Data baru dimuat, buka lagi SGR-nya'); go(view); }
+  } else { toast('Data baru dimuat dari '+(srv.oleh||'temanmu')); go(view); }
+}
+async function cekStokServer(kode){
+  if(!window.fbDb||!window.fbAuth||!window.fbAuth.currentUser) return null;
+  try{
+    const doc=await window.fbDb.collection('gudang_barang').doc(sid(kode)).get();
+    if(!doc.exists) return null;
+    return doc.data();
+  }catch(e){ return null; }
+}
+
 async function pushCloud(){
   if(!window.fbDb||!window.fbAuth||!window.fbAuth.currentUser){setSync('Mode lokal: belum masuk akun cloud',1);return}
   if(!SYNC.ready)return;
@@ -204,13 +277,37 @@ function startSync(){
       // Sampel yang sudah dihapus: jangan dimunculkan lagi, hapus juga dari cloud
       if(col==='gudang_barang'&&(SAMPEL_DIHAPUS.includes(d.kode)||SAMPEL_DIHAPUS.map(sid).includes(c.doc.id))){if(ix>=0)a.splice(ix,1);delete SYNC.sent[k];try{db.collection(col).doc(c.doc.id).delete()}catch(e){}return}
       if(c.type==='removed'){if(ix>=0)a.splice(ix,1);delete SYNC.sent[k];return}
-      let o;if(ix>=0){o=Object.assign(a[ix],d)}else{o=d;a.push(o)}
+      let o;
+      if(ix>=0){
+        // PENGAMAN: kalau lokal masih ada perubahan yang belum ke-sync (beda dari SYNC.sent),
+        // jangan langsung timpa dengan data server. Simpan konfliknya, biar tidak hilang diam-diam.
+        const lok=a[ix]; const cpLok={...lok}; delete cpLok.foto; const lokJson=sj(cpLok);
+        const isDirty = SYNC.sent[k] && SYNC.sent[k]!==lokJson;
+        const srvT=d.updatedAt||0, lokT=lok.updatedAt||0;
+        if(col==='gudang_barang' && isDirty && srvT>lokT && d.oleh!==siapa()){
+          if(!SYNC.conflicts) SYNC.conflicts={};
+          SYNC.conflicts[k]={server:d, local:{...lok}};
+          try{toast('⚠️ '+d.kode+' baru diubah '+ (d.oleh||'temanmu') +' - cek dulu sebelum Simpan');}catch(e){}
+          // Jangan timpa lokal, biar edit lokal tidak hilang. Server tetap dicatat di konflik.
+          const cp2={...lok}; delete cp2.foto; SYNC.sent[k]=sj(cp2);
+          // Kalau modal edit sedang terbuka untuk kode ini, tampilkan peringatan di dalam modal
+          try{const w=document.getElementById('editKonflikWarn'); if(w && editBase && editBase.kode===d.kode){ w.style.display='block'; w.innerHTML=`⚠️ Baru diubah <b>${esc(d.oleh||'-')}</b> • ${fmtWaktuKonflik(srvT)} • ${esc(d.aksi||'')}. Jangan Simpan dulu sebelum cek.`; }}catch(e){}
+          return;
+        }
+        // Kalau modal edit terbuka dan server berubah, kasih peringatan saja (tidak timpa form)
+        if(col==='gudang_barang' && editBase && editBase.kode===d.kode && srvT>(editBase.updatedAt||0) && d.oleh!==siapa()){
+          try{const w=document.getElementById('editKonflikWarn'); if(w){ w.style.display='block'; w.innerHTML=`⚠️ Baru diubah <b>${esc(d.oleh||'-')}</b> • ${fmtWaktuKonflik(srvT)} • ${esc(d.aksi||'')}. Kalau kamu Simpan sekarang, editannya dia ketimpa.`; }}catch(e){}
+        }
+        o=Object.assign(a[ix],d)
+      }else{o=d;a.push(o)}
       const cp={...o};delete cp.foto;SYNC.sent[k]=sj(cp)});
     ren();if(f){f=0;done()}},e=>setSync('Gagal sinkron: '+(e.code||e.message),1)))};
   watch('gudang_barang',()=>items,x=>sid(x.kode));watch('gudang_masuk',()=>masuk,x=>x.id);watch('gudang_pinjam',()=>pinjam,x=>x.id);
 }
 function loadData(){try{const raw=localStorage.getItem(DATA_KEY);if(!raw)return;const d=JSON.parse(raw);if(Array.isArray(d.items))items=d.items.filter(i=>i&&!SAMPEL_DIHAPUS.includes(i.kode));if(Array.isArray(d.masuk))masuk=d.masuk.filter(m=>m&&!SAMPEL_DIHAPUS.includes(m.kode));if(Array.isArray(d.pinjam))pinjam=d.pinjam.filter(p=>p&&!SAMPEL_DIHAPUS.includes(p.kode));}catch(e){}items=items.filter(i=>i&&!SAMPEL_DIHAPUS.includes(i.kode));}
 loadData();
+// MIGRASI PENGAMAN: barang lama yang belum punya versi, kasih v & updatedAt awal biar bisa dicek konfliknya
+try{items.forEach(it=>{if(it && typeof it.v==='undefined') it.v=0; if(it && !it.updatedAt) it.updatedAt=0;});}catch(e){}
 // Langsung timpa localStorage lama biar sampel tidak kebaca lagi pas refresh berikutnya
 try{localStorage.setItem(DATA_KEY,JSON.stringify({items,masuk,pinjam}))}catch(e){}
 
@@ -272,12 +369,20 @@ const pill=i=>`<span class="st ${stat(i)[1]}">${stat(i)[0]}</span>`;
 const th=i=>`<div class="th" style="background:hsl(${[...String(i.kode||'?')].reduce((a,c)=>a+c.charCodeAt(0)*7,0)%360} 50% 58%)">${esc((i.nama||'?')[0])}</div>`;
 function toast(t){const e=$('#toast');e.textContent=t;e.classList.add('on');clearTimeout(toast.t);toast.t=setTimeout(()=>e.classList.remove('on'),2200)}
 function nav(){$('#nav').innerHTML=VIEWS.map(([k,l])=>`<button class="${k===view?'on':''}" onclick="go('${k}')"><svg viewBox="0 0 24 24">${IC[k]}</svg>${l}</button>`).join('')+`<hr><button class="${view==='panduan'?'on':''}" onclick="go('panduan')"><svg viewBox="0 0 24 24">${IC.panduan}</svg>Panduan Cara Pakai</button><button onclick="doLogout()"><svg viewBox="0 0 24 24">${IC.out}</svg>Keluar</button>`}
-function go(v){view=v;nav();({dash,cari,daftar,masuk:masukV,pinjam:pinjamV,riwayat:riwayatV,panduan:panduanV})[v]()}
+function go(v){view=v;nav();const p=document.getElementById('notifPanel');if(p)p.classList.remove('on');({dash,cari,daftar,masuk:masukV,pinjam:pinjamV,riwayat:riwayatV,panduan:panduanV})[v]();try{if(typeof updateNotifBadge==='function')updateNotifBadge();}catch(e){}}
 const opts=()=>items.map(i=>`<option value="${esc(i.kode)}">${esc(i.kode)} - ${esc(i.nama)} (stok ${i.stok} ${esc(i.sat)})</option>`).join('');
 function info(){const v=$('#m1')?.value||'';const i=find(v.trim().toUpperCase());const el=$('#minfo');if(!el)return;el.textContent=i?`Kode lama: ${i.kode} (Buyer ${i.buyer||'-'}) - Stok sekarang ${i.stok} ${i.sat} - ${i.lok} - ${i.kat} - Jumlah baru akan ditambah ke stok ini`:(v.trim()?`Kode baru: akan dibuat sebagai sampel baru di ${$('#m5')?.value||'Januari General 1'}`:'')}
 const head=(t,b='')=>`<div class="head"><h1>${t}</h1>${b}</div>`;
 
 function parseTglId(s){try{const parts=String(s||'').split('/');if(parts.length===3){const d=new Date(Number(parts[2]),Number(parts[1])-1,Number(parts[0]));d.setHours(0,0,0,0);return d;}}catch(e){} return null;}
+// === NOTIF LONCENG: dari data yang sudah ada (Masuk / Ambil / Kembali / Edit), 14 hari terakhir ===
+function getNotifs(){const today=new Date();today.setHours(0,0,0,0);const batas=new Date(today);batas.setDate(batas.getDate()-13);const list=[];(masuk||[]).forEach((m,ix)=>{const d=parseTglId(m.tgl);if(!d||d<batas)return;const it=find(m.kode);list.push({id:'masuk-'+(m.id||m.tgl+'-'+m.kode+'-'+ix),d,tgl:m.tgl,tipe:'Masuk',kode:m.kode,oleh:m.oleh||'-',teks:'nambah '+m.kode+' +'+m.qty+' pcs',sub:'Buyer: '+(m.sup||'-')+(it?' • '+it.lok:'')});});(pinjam||[]).forEach((p,ix)=>{const dA=parseTglId(p.tgl);if(dA&&dA>=batas)list.push({id:'ambil-'+(p.id||ix),d:dA,tgl:p.tgl,tipe:'Ambil',kode:p.kode,oleh:p.oleh||'-',teks:'ambil '+p.kode+' '+p.qty+' pcs',sub:'Diambil oleh '+(p.orang||'-')+' • '+(p.untuk||'-')});if(p.st==='Dikembalikan'){const dK=parseTglId(p.tgl_kembali||p.tgl);if(dK&&dK>=batas)list.push({id:'kembali-'+(p.id||ix),d:dK,tgl:p.tgl_kembali||p.tgl,tipe:'Kembali',kode:p.kode,oleh:p.oleh_kembali||p.oleh||'-',teks:'balikin '+p.kode+' '+p.qty+' pcs',sub:'Dikembalikan oleh '+(p.oleh_kembali||p.oleh||'-')});}});items.forEach(it=>{if(!it.tgl_ubah)return;const d=parseTglId(it.tgl_ubah);if(!d||d<batas)return;if(it.aksi==='Diedit')list.push({id:'edit-'+it.kode+'-'+it.tgl_ubah+'-'+(it.oleh||''),d,tgl:it.tgl_ubah,tipe:'Edit',kode:it.kode,oleh:it.oleh||'-',teks:'ngedit '+it.kode,sub:'Lokasi '+it.lok+' • Buyer '+(it.buyer||'-')+' • Stok '+it.stok+' pcs'});});list.sort((a,b)=>b.d-a.d);return list;}
+function getNotifRead(){try{const raw=localStorage.getItem('gk_notif_read');if(raw===null)return null;return new Set(JSON.parse(raw||'[]'));}catch(e){return new Set();}}
+function updateNotifBadge(){const list=getNotifs();let read=getNotifRead();if(read===null){try{localStorage.setItem('gk_notif_read',JSON.stringify(list.map(n=>n.id)));}catch(e){}read=new Set(list.map(n=>n.id));}const saya=siapa();const unread=list.filter(n=>n.oleh!==saya&&!read.has(n.id));const b=document.getElementById('notifBadge');if(b){if(unread.length){b.textContent=unread.length>99?'99+':unread.length;b.style.display='grid';}else{b.style.display='none';}}return {list,unread};}
+function toggleNotif(e){if(e)e.stopPropagation();const panel=document.getElementById('notifPanel');if(!panel)return;if(panel.classList.contains('on')){panel.classList.remove('on');return;}const {list}=updateNotifBadge();const saya=siapa();const ikon=t=>t==='Masuk'?'📥':t==='Ambil'?'📤':t==='Kembali'?'↩️':'✏️';const warna=t=>t==='Masuk'?'#dff5ea':t==='Ambil'?'#fde3e1':t==='Kembali'?'#dff0ff':'#fff3cd';panel.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center;padding:2px 6px 10px"><b>Aktivitas tim</b><span class="k">${list.length} • 14 hari terakhir</span></div>`+(list.length?list.slice(0,20).map(n=>`<div class="notif-item" onclick="tutupNotifPanel();go('riwayat')"><div style="width:32px;height:32px;border-radius:50%;background:${warna(n.tipe)};display:grid;place-items:center;font-size:15px">${ikon(n.tipe)}</div><div><div style="font-weight:600;font-size:13px">${esc(n.teks)}</div><div class="k">${esc(n.sub)}</div><div class="k">Oleh: ${esc(n.oleh===saya?'Kamu':n.oleh)} • ${esc(n.tgl)}</div></div></div>`).join(''):`<div class="empty">Belum ada aktivitas dalam 14 hari terakhir.</div>`)+`<button class="btn sm" style="width:100%;margin-top:8px;background:var(--pill);color:var(--ink)" onclick="tutupNotifPanel();go('riwayat')">Lihat semua di Riwayat</button>`;panel.classList.add('on');try{const read=getNotifRead()||new Set();list.forEach(n=>read.add(n.id));localStorage.setItem('gk_notif_read',JSON.stringify([...read]));}catch(err){}const b=document.getElementById('notifBadge');if(b)b.style.display='none';}
+function tutupNotifPanel(){const p=document.getElementById('notifPanel');if(p)p.classList.remove('on');}
+document.addEventListener('click',e=>{const w=document.getElementById('bellWrap');const p=document.getElementById('notifPanel');if(p&&p.classList.contains('on')&&w&&!w.contains(e.target))p.classList.remove('on');});
+
 function riwayatV(){
   const today=new Date(); today.setHours(0,0,0,0);
   const batas=new Date(today); batas.setDate(batas.getDate()-13);
@@ -327,7 +432,9 @@ function panduanV(){
 
   <div><h3 style="margin:0 0 6px">6. Ambil & Kembali</h3><p class="k" style="margin:0">- Mau ambil: pilih barang, isi <b>Jumlah</b> + <b>Nama pengambil</b> (orang yang bawa fisiknya, bisa beda sama yang login), klik <b>Catat pengambilan</b>. Stok otomatis berkurang, namamu kecatat sebagai yang mencatat.<br>- Sudah balik: klik <b>Kembalikan</b> di catatan itu. Stok otomatis nambah lagi, namamu kecatat sebagai yang mengembalikan.<br>- Kalau stok tidak cukup, web akan nolak, tidak bisa minus.</p></div>
 
-  <div><h3 style="margin:0 0 6px">7. Kalau Ada Masalah</h3><p class="k" style="margin:0">- <b>Barang tidak ketemu:</b> cek ejaan kode / nama, hapus filter Kategori & Status.<br>- <b>Foto tidak muncul:</b> coba refresh, cek internet, karena foto diambil dari Database.<br>- <b>Balik ke login pas refresh:</b> itu kalau kamu baru klik Keluar. Login lagi sekali, nanti 30 hari tidak minta lagi.<br>- <b>Lupa PIN:</b> hubungi Admin Gudang, jangan bikin akun baru / ganti PIN sembarangan.</p></div>
+  <div><h3 style="margin:0 0 6px">7. Lonceng Notifikasi</h3><p class="k" style="margin:0">Lonceng di pojok kanan atas nunjukin aktivitas tim 14 hari terakhir: ada yang nambah, ngedit, ambil, atau balikin. Kalau ada angka merahnya, berarti ada aktivitas baru dari orang lain yang belum kamu lihat. Klik loncengnya buat lihat listnya, angkanya langsung hilang. Aktivitasmu sendiri gak dihitung, biar gak berisik.</p></div>
+
+  <div><h3 style="margin:0 0 6px">8. Kalau Ada Masalah</h3><p class="k" style="margin:0">- <b>Barang tidak ketemu:</b> cek ejaan kode / nama, hapus filter Kategori & Status.<br>- <b>Foto tidak muncul:</b> coba refresh, cek internet, karena foto diambil dari Database.<br>- <b>Balik ke login pas refresh:</b> itu kalau kamu baru klik Keluar. Login lagi sekali, nanti 30 hari tidak minta lagi.<br>- <b>Lupa PIN:</b> hubungi Admin Gudang, jangan bikin akun baru / ganti PIN sembarangan.</p></div>
 
   <button class="btn" onclick="go('dash')">Mengerti, Kembali ke Dasbor</button>
  </div>`;
@@ -446,13 +553,47 @@ async function tambah(){
 
 function hapusBarang(idx){const it=items[idx];if(!it)return;if(!confirm('Hapus '+it.nama+' ('+it.kode+')? Stok '+it.stok+' akan hilang.'))return;items.splice(idx,1);if(sel===it.kode)sel='';saveData();toast('Barang dihapus');go(view);}
 let editIdx=-1;
-function editBarang(idx){const it=items[idx];if(!it)return;editIdx=idx;const m=$('#editModal');m.innerHTML=`<div class="lihat-card"><div style="display:flex;justify-content:space-between;align-items:start;gap:12px"><div><div class="k">Edit sampel</div><div style="font-size:20px;font-weight:600">${esc(it.kode)}</div><div class="k">Salah ketik? Benerin di sini, gak perlu hapus.</div></div><button class="btn sm" style="background:var(--pill);color:var(--ink)" onclick="tutupEdit()">Tutup ✕</button></div><div style="display:grid;gap:10px;margin-top:14px"><label style="display:grid;gap:4px;font-size:12px;color:var(--mute)">Kode<input id="eKode" value="${esc(it.kode)}" style="background:#fff"></label><label style="display:grid;gap:4px;font-size:12px;color:var(--mute)">Lokasi (di sebelah Kode)<input id="eLok" value="${esc(it.lok)}" style="background:#fff"></label><label style="display:grid;gap:4px;font-size:12px;color:var(--mute)">Buyer<input id="eBuyer" value="${esc(it.buyer||'')}" style="background:#fff"></label><label style="display:grid;gap:4px;font-size:12px;color:var(--mute)">Color (pisahkan pakai koma, contoh: Maroon, Olive)<input id="eColor" value="${esc((it.color||'')==='-'?'':it.color)}" style="background:#fff"></label><label style="display:grid;gap:4px;font-size:12px;color:var(--mute)">Kategori<input id="eKat" value="${esc(it.kat)}" style="background:#fff"></label><label style="display:grid;gap:4px;font-size:12px;color:var(--mute)">Stok<input id="eStok" type="number" min="0" value="${it.stok}" style="background:#fff"></label></div><div class="k" style="margin-top:10px">Kalau Kode diganti, riwayat masuk & ambil yang pakai kode lama ikut pindah ke kode baru. Foto ikut pindah juga.</div><button class="btn" style="width:100%;margin-top:14px" onclick="simpanEdit()">Simpan perubahan</button><button class="btn lihat-close" onclick="tutupEdit()">Batal</button></div>`;m.classList.add('on');}
-function tutupEdit(){const m=$('#editModal');if(m){m.classList.remove('on');m.innerHTML='';}editIdx=-1;}
-async function simpanEdit(){const it=items[editIdx];if(!it)return;const kodeBaru=$('#eKode').value.trim().toUpperCase(),lokBaru=$('#eLok').value.trim(),buyerBaru=$('#eBuyer').value.trim()||'-',colorBaru=$('#eColor').value.trim()||'-',katBaru=$('#eKat').value.trim()||'Garment',stokBaru=Number($('#eStok').value);if(!kodeBaru)return toast('Kode tidak boleh kosong');if(!lokBaru)return toast('Lokasi tidak boleh kosong');if(!Number.isFinite(stokBaru)||stokBaru<0)return toast('Stok harus angka 0 atau lebih');if(kodeBaru!==it.kode&&items.some((x,i)=>i!==editIdx&&x.kode.toLowerCase()===kodeBaru.toLowerCase()))return toast('Kode sudah dipakai barang lain');const kodeLama=it.kode,stokLama=it.stok,fotoLama=it.foto||'';if(kodeBaru!==kodeLama){masuk.forEach(m=>{if(m.kode===kodeLama)m.kode=kodeBaru});pinjam.forEach(p=>{if(p.kode===kodeLama)p.kode=kodeBaru});if(sel===kodeLama)sel=kodeBaru;if(SYNC.delta[kodeLama])delete SYNC.delta[kodeLama];if(fotoLama&&window.fbDb){try{await window.fbDb.collection('gudang_foto').doc(sid(kodeLama)).delete();await window.fbDb.collection('gudang_foto').doc(sid(kodeBaru)).set({kode:kodeBaru,foto:fotoLama,updatedAt:new Date().toISOString()},{merge:true});}catch(e){}}}else{if(stokBaru!==stokLama)addDelta(kodeBaru,stokBaru-stokLama);}it.kode=kodeBaru;it.lok=lokBaru;it.buyer=buyerBaru;it.color=colorBaru;it.kat=katBaru;it.stok=stokBaru;it.nama=buyerBaru!=='-'?buyerBaru:kodeBaru;it.oleh=siapa();it.aksi='Diedit';it.tgl_ubah=tgl();saveData();tutupEdit();toast('Perubahan disimpan: '+kodeBaru);go(view);}
+function editBarang(idx){const it=items[idx];if(!it)return;editIdx=idx;editBase=salinBarang(it);const m=$('#editModal');m.innerHTML=`<div class="lihat-card"><div style="display:flex;justify-content:space-between;align-items:start;gap:12px"><div><div class="k">Edit sampel</div><div style="font-size:20px;font-weight:600">${esc(it.kode)}</div><div class="k">Salah ketik? Benerin di sini, gak perlu hapus.</div><div class="k">Terakhir diubah oleh <b>${esc(it.oleh||'-')}</b> • ${it.updatedAt?fmtWaktuKonflik(it.updatedAt):esc(it.tgl_ubah||'-')} • ${esc(it.aksi||'-')}</div><div id="editKonflikWarn" style="display:none;background:#fff3cd;border:1px solid #f0d48a;border-radius:12px;padding:10px 12px;margin-top:10px;font-size:12px;color:#7a5a00"></div></div><button class="btn sm" style="background:var(--pill);color:var(--ink)" onclick="tutupEdit()">Tutup ✕</button></div><div style="display:grid;gap:10px;margin-top:14px"><label style="display:grid;gap:4px;font-size:12px;color:var(--mute)">Kode<input id="eKode" value="${esc(it.kode)}" style="background:#fff"></label><label style="display:grid;gap:4px;font-size:12px;color:var(--mute)">Lokasi (di sebelah Kode)<input id="eLok" value="${esc(it.lok)}" style="background:#fff"></label><label style="display:grid;gap:4px;font-size:12px;color:var(--mute)">Buyer<input id="eBuyer" value="${esc(it.buyer||'')}" style="background:#fff"></label><label style="display:grid;gap:4px;font-size:12px;color:var(--mute)">Color (pisahkan pakai koma, contoh: Maroon, Olive)<input id="eColor" value="${esc((it.color||'')==='-'?'':it.color)}" style="background:#fff"></label><label style="display:grid;gap:4px;font-size:12px;color:var(--mute)">Kategori<input id="eKat" value="${esc(it.kat)}" style="background:#fff"></label><label style="display:grid;gap:4px;font-size:12px;color:var(--mute)">Stok<input id="eStok" type="number" min="0" value="${it.stok}" style="background:#fff"></label></div><div class="k" style="margin-top:10px">Kalau Kode diganti, riwayat masuk & ambil yang pakai kode lama ikut pindah ke kode baru. Foto ikut pindah juga.</div><button class="btn" style="width:100%;margin-top:14px" onclick="simpanEdit()">Simpan perubahan</button><button class="btn lihat-close" onclick="tutupEdit()">Batal</button></div>`;m.classList.add('on');}
+function tutupEdit(){const m=$('#editModal');if(m){m.classList.remove('on');m.innerHTML='';}editIdx=-1;editBase=null;pendingEdit=null;}
+async function simpanEdit(){
+  const it=items[editIdx];if(!it)return;
+  const kodeBaru=$('#eKode').value.trim().toUpperCase(),lokBaru=$('#eLok').value.trim(),buyerBaru=$('#eBuyer').value.trim()||'-',colorBaru=$('#eColor').value.trim()||'-',katBaru=$('#eKat').value.trim()||'Garment',stokBaru=Number($('#eStok').value);
+  if(!kodeBaru)return toast('Kode tidak boleh kosong');
+  if(!lokBaru)return toast('Lokasi tidak boleh kosong');
+  if(!Number.isFinite(stokBaru)||stokBaru<0)return toast('Stok harus angka 0 atau lebih');
+  if(kodeBaru!==it.kode&&items.some((x,i)=>i!==editIdx&&x.kode.toLowerCase()===kodeBaru.toLowerCase()))return toast('Kode sudah dipakai barang lain');
+  const kodeLama=it.kode;
+  // PENGAMAN: cek ke server dulu, apakah SGR ini sudah diubah orang lain sejak kamu buka edit
+  if(editBase && kodeBaru===kodeLama){
+    const srv=await cekKonflikServer(kodeLama, editBase);
+    if(srv){
+      pendingEdit={kodeBaru,lokBaru,buyerBaru,colorBaru,katBaru,stokBaru,kodeLama};
+      const milikku={kode:kodeLama,lok:lokBaru,buyer:buyerBaru,color:colorBaru,kat:katBaru,stok:stokBaru,oleh:siapa()};
+      tampilKonflik(srv, milikku, 'edit');
+      return;
+    }
+  }
+  await simpanEditPaksa({kodeBaru,lokBaru,buyerBaru,colorBaru,katBaru,stokBaru,kodeLama});
+}
+async function simpanEditPaksa(p){
+  const it=items[editIdx];if(!it)return;
+  const {kodeBaru,lokBaru,buyerBaru,colorBaru,katBaru,stokBaru,kodeLama}=p;
+  const stokLama=it.stok,fotoLama=it.foto||'';
+  if(kodeBaru!==kodeLama){
+    masuk.forEach(m=>{if(m.kode===kodeLama)m.kode=kodeBaru});
+    pinjam.forEach(p2=>{if(p2.kode===kodeLama)p2.kode=kodeBaru});
+    if(sel===kodeLama)sel=kodeBaru;
+    if(SYNC.delta[kodeLama])delete SYNC.delta[kodeLama];
+    if(fotoLama&&window.fbDb){try{await window.fbDb.collection('gudang_foto').doc(sid(kodeLama)).delete();await window.fbDb.collection('gudang_foto').doc(sid(kodeBaru)).set({kode:kodeBaru,foto:fotoLama,updatedAt:new Date().toISOString()},{merge:true});}catch(e){}}
+  }else{
+    if(stokBaru!==stokLama)addDelta(kodeBaru,stokBaru-stokLama);
+  }
+  it.kode=kodeBaru;it.lok=lokBaru;it.buyer=buyerBaru;it.color=colorBaru;it.kat=katBaru;it.stok=stokBaru;it.nama=buyerBaru!=='-'?buyerBaru:kodeBaru;it.oleh=siapa();it.aksi='Diedit';it.tgl_ubah=tgl();bumpVersi(it);editBase=null;saveData();tutupEdit();toast('Perubahan disimpan: '+kodeBaru);go(view);
+}
 
 function masukV(){masukR();info();setTimeout(()=>{updateColorInputs();},50)}
 function masukR(){
- $('#main').innerHTML=head('Barang Masuk - Simpan Barang')+`<div class="k" style="margin:0 4px 12px">Satu-satunya tempat simpan barang. Kode baru = sampel baru langsung dibuat. Kode lama = stoknya ditambah. Jumlah bebas, bisa 2 / 3 / 4 / 5 pcs.</div><div class="form"><input id="m1" placeholder="Kode (SGR 0000000004) - ketik kode baru atau lama" oninput="syncMasuk()" list="kodeList"><datalist id="kodeList">${items.map(i=>`<option value="${esc(i.kode)}">${esc(i.buyer||'')} - ${esc(i.lok)}</option>`).join('')}</datalist><input id="m3" type="number" min="1" placeholder="Jumlah bebas (2/3/4/5)"><input id="m4" placeholder="Buyer (Ann Taylor / LL Bean / Target)"><input id="m5" value="Januari General 1" placeholder="Lokasi"><input id="m6" value="Garment" placeholder="Kategori"></div>
+ $('#main').innerHTML=head('Barang Masuk - Simpan Barang')+`<div class="k" style="margin:0 4px 12px">Satu-satunya tempat simpan barang. Kode baru = sampel baru langsung dibuat. Kode lama = stoknya ditambah. Jumlah bebas, bisa 2 / 3 / 4 / 5 pcs.</div><div class="form" style="grid-template-columns:1fr 1fr 1fr 1fr 1fr"><label style="display:grid;gap:4px;font-size:11px;color:var(--mute)">Kode<input id="m1" placeholder="SGR 0000000004" oninput="syncMasuk()" list="kodeList"><datalist id="kodeList">${items.map(i=>`<option value="${esc(i.kode)}">${esc(i.buyer||'')} - ${esc(i.lok)}</option>`).join('')}</datalist></label><label style="display:grid;gap:4px;font-size:11px;color:var(--mute)">Jumlah<input id="m3" type="number" min="1" placeholder="2 / 3 / 4 / 5"></label><label style="display:grid;gap:4px;font-size:11px;color:var(--mute)">Buyer<input id="m4" placeholder="Ann Taylor / LL Bean"></label><label style="display:grid;gap:4px;font-size:11px;color:var(--mute);font-weight:700">Lokasi<input id="m5" value="Januari General 1" placeholder="Lokasi" style="font-weight:600"></label><label style="display:grid;gap:4px;font-size:11px;color:var(--mute)">Kategori<input id="m6" value="Garment" placeholder="Kategori"></label></div><div class="k" style="margin:-6px 4px 10px">Lokasi itu kolom ke-4, isinya sekarang <b>Januari General 1</b>. Kalau barangnya di rak lain, ganti dulu sebelum Simpan. Kalau ketik Kode lama, Lokasi keisi otomatis dari data lama.</div>
 <div style="display:grid;gap:8px;margin-bottom:12px;background:var(--pill);border-radius:18px;padding:12px 14px">
   <label style="display:flex;gap:10px;align-items:center;font-weight:500">Berapa warna? <select id="mColorCount" onchange="updateColorInputs()" style="background:#fff;min-width:80px"><option value="1">1 warna</option><option value="2">2 warna</option><option value="3">3 warna</option><option value="4" selected>4 warna</option><option value="5">5 warna</option><option value="6">6 warna</option></select><span class="k" style="font-weight:400">Pilih dulu, baru pilih warnanya di bawah</span></label>
   <div id="colorInputs" style="display:grid;grid-template-columns:1fr 1fr;gap:8px"></div>
@@ -460,7 +601,7 @@ function masukR(){
   <datalist id="colorList"><option value="Putih"></option><option value="Hitam"></option><option value="Navy"></option><option value="Abu-abu"></option><option value="Merah"></option><option value="Biru"></option><option value="Hijau"></option><option value="Kuning"></option><option value="Coklat"></option><option value="Pink"></option></datalist>
 </div><div>
 <div class="foto-box"><span>Foto sampel dari galeri (opsional)</span><input id="mFoto" type="file" accept="image/*" onchange="onFotoMasuk(this)"><img id="mFotoPreview" class="foto-preview" alt="Preview foto sampel"><small id="mFotoInfo" class="k">Belum ada foto. Foto akan dikompres otomatis jadi max 900px, target di bawah 100KB.</small><div><button type="button" class="btn sm" style="background:var(--pill);color:var(--ink)" onclick="hapusFotoMasuk()">Hapus foto</button></div></div><div class="k" id="minfo" style="margin:2px 4px 12px"></div><button class="btn" onclick="catatMasuk()">Simpan barang</button>
- <h2>Riwayat masuk</h2><div class="wrap"><table><tr><th>Foto</th><th>Tanggal</th><th>Barang</th><th>Jumlah</th><th>Buyer</th><th>Oleh</th></tr>${masuk.slice().reverse().map(m=>`<tr><td>${m.foto?`<img src="${m.foto}" class="foto-thumb" alt="Foto">`:(find(m.kode)?.foto?`<img src="${find(m.kode).foto}" class="foto-thumb" alt="Foto">`:'-')}</td><td>${m.tgl}</td><td>${esc(find(m.kode)?.nama||m.kode)}</td><td>+${m.qty}</td><td>${esc(m.sup)}</td><td style="font-weight:500">${esc(m.oleh||'-')}</td></tr>`).join('')}</table></div>`}
+ <h2>Riwayat masuk</h2><div class="wrap"><table><tr><th>Foto</th><th>Tanggal</th><th>Barang</th><th>Lokasi</th><th>Jumlah</th><th>Buyer</th><th>Oleh</th></tr>${masuk.slice().reverse().map(m=>`<tr><td>${m.foto?`<img src="${m.foto}" class="foto-thumb" alt="Foto">`:(find(m.kode)?.foto?`<img src="${find(m.kode).foto}" class="foto-thumb" alt="Foto">`:'-')}</td><td>${m.tgl}</td><td>${esc(find(m.kode)?.nama||m.kode)}<div class="k">${esc(m.kode)}</div></td><td style="font-weight:600">${esc(find(m.kode)?.lok||'-')}</td><td>+${m.qty}</td><td>${esc(m.sup)}</td><td style="font-weight:500">${esc(m.oleh||'-')}</td></tr>`).join('')}</table></div>`}
 function updateColorInputs(){
   const n=Number($('#mColorCount')?.value||1);
   const wrap=$('#colorInputs'); if(!wrap) return;
@@ -476,15 +617,85 @@ function updateColorInputs(){
 }
 function getColors(){return [...document.querySelectorAll('.color-input')].map(el=>el.value.trim()).filter(Boolean).join(', ')||'-';}
 function syncMasuk(){const k=$('#m1').value.trim().toUpperCase();const ex=find(k);if(ex){$('#m4').value=ex.buyer||'';$('#m5').value=ex.lok;$('#m6').value=ex.kat;const cols=(ex.color||'').split(',').map(s=>s.trim()).filter(Boolean);const cc=$('#mColorCount');if(cc){cc.value=String(Math.max(1,Math.min(6,cols.length||1)));}updateColorInputs();[...document.querySelectorAll('.color-input')].forEach((el,i)=>{el.value=cols[i]||'';});}}
-async function catatMasuk(){const k=$('#m1').value.trim().toUpperCase(),n=Number($('#m3').value),sup=$('#m4').value.trim()||'-',lok=$('#m5').value.trim()||'Januari General 1',kat=$('#m6').value.trim()||'Garment',color=getColors();if(!k)return toast('Isi kode sampel dulu');if(!Number.isFinite(n)||n<1)return toast('Jumlah bebas ditulis, minimal 1, bisa 2 / 3 / 4 / 5 pcs');const fotoUrl=pendingFotoMasuk?await uploadFotoKeFirebase(pendingFotoMasuk,k):'';const oleh=siapa();const ex=find(k);if(ex){(ex.stok+=n,addDelta(ex.kode,n));ex.oleh=oleh;ex.aksi='+'+n+' pcs';ex.tgl_ubah=tgl();ex.buyer=sup;if(color!=='-')ex.color=color;if(fotoUrl)ex.foto=fotoUrl;toast('Stok '+k+' ditambah +'+n+' jadi '+ex.stok+' oleh '+oleh)}else{const namaBaru=sup!=='-'?sup:k;items.push({kode:k,nama:namaBaru,kat,sat:'pcs',lok,stok:n,min:0,foto:fotoUrl,oleh:oleh,aksi:'Baru +'+n+' pcs',tgl_ubah:tgl(),buyer:sup,style:'-',color:color});toast('Sampel baru dibuat: '+k+' stok '+n+' oleh '+oleh)}masuk.push({tgl:tgl(),kode:k,qty:n,sup,foto:fotoUrl,oleh:oleh});pendingFotoMasuk=null;saveData();toast('Barang masuk dicatat');masukV();}
+async function catatMasuk(){
+  const k=$('#m1').value.trim().toUpperCase(),n=Number($('#m3').value),sup=$('#m4').value.trim()||'-',lok=$('#m5').value.trim()||'Januari General 1',kat=$('#m6').value.trim()||'Garment',color=getColors();
+  if(!k)return toast('Isi kode sampel dulu');
+  if(!Number.isFinite(n)||n<1)return toast('Jumlah bebas ditulis, minimal 1, bisa 2 / 3 / 4 / 5 pcs');
+  const ex0=find(k);
+  // PENGAMAN: kalau barang sudah ada dan sudah diubah orang lain, cek dulu ke server
+  if(ex0){
+    const srv=await cekStokServer(k);
+    if(srv && srv.updatedAt && srv.updatedAt>(ex0.updatedAt||0) && srv.oleh!==siapa()){
+      const bedaField = srv.lok!==ex0.lok || (srv.buyer||'')!==(ex0.buyer||'') || (srv.color||'')!==(ex0.color||'');
+      if(bedaField || srv.stok!==ex0.stok){
+        // Sesuaikan stok lokal ke server dulu (ditambah delta yang belum ke-sync), lalu tampilkan peringatan
+        const deltaPending = SYNC.delta[k]||0;
+        const stokServer = srv.stok;
+        // Simpan data server ke lokal, tapi jangan hilangkan delta lokal
+        Object.assign(ex0, srv);
+        // Stok di server sudah yang terbaru, delta lokal tetap berlaku di pushCloud via increment
+        // Untuk tampilan, stok lokal = stok server + delta (supaya tidak kelihatan loncat)
+        ex0.stok = stokServer + deltaPending;
+        try{localStorage.setItem(DATA_KEY, JSON.stringify({items,masuk,pinjam}));}catch(e){}
+        pendingEdit={k,n,sup,lok,kat,color};
+        const milikku={kode:k,lok:lok,buyer:sup,color:color,kat:kat,stok:ex0.stok+n,oleh:siapa()};
+        tampilKonflik(srv, milikku, 'masuk');
+        return;
+      }
+    }
+  }
+  await catatMasukPaksa({k,n,sup,lok,kat,color});
+}
+async function catatMasukPaksa(p){
+  const {k,n,sup,lok,kat,color}=p;
+  const fotoUrl=pendingFotoMasuk?await uploadFotoKeFirebase(pendingFotoMasuk,k):'';
+  const oleh=siapa();const ex=find(k);
+  if(ex){(ex.stok+=n,addDelta(ex.kode,n));ex.oleh=oleh;ex.aksi='+'+n+' pcs';ex.tgl_ubah=tgl();ex.buyer=sup;if(color!=='-')ex.color=color;if(fotoUrl)ex.foto=fotoUrl;bumpVersi(ex);toast('Stok '+k+' ditambah +'+n+' jadi '+ex.stok+' oleh '+oleh)}
+  else{const namaBaru=sup!=='-'?sup:k;items.push({kode:k,nama:namaBaru,kat,sat:'pcs',lok,stok:n,min:0,foto:fotoUrl,oleh:oleh,aksi:'Baru +'+n+' pcs',tgl_ubah:tgl(),buyer:sup,style:'-',color:color,v:1,updatedAt:Date.now()});toast('Sampel baru dibuat: '+k+' stok '+n+' oleh '+oleh)}
+  masuk.push({tgl:tgl(),kode:k,qty:n,sup,foto:fotoUrl,oleh:oleh});pendingFotoMasuk=null;saveData();toast('Barang masuk dicatat');masukV();
+}
 
 function pinjamV(){
  $('#main').innerHTML=head('Ambil & Kembali')+`<div class="form"><select id="p1">${opts()}</select><input id="p2" type="number" min="1" placeholder="Jumlah"><input id="p3" placeholder="Nama pengambil"><input id="p4" placeholder="Untuk apa? (fitting / foto / cek jahitan / kirim buyer)"><label style="display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--mute)">Janji kembali<input id="p5" type="date"></label></div><button class="btn" onclick="ambil()">Catat pengambilan</button>
  <h2>Catatan</h2>${pinjam.slice().reverse().map(p=>{const i=find(p.kode)||{kode:p.kode,nama:p.kode+' (dihapus)',sat:'pcs'};return `<div class="row">${fotoThumb(i)}<div><div class="n">${esc(i.nama)}</div><div class="k">${p.qty} ${esc(i.sat)} - ${esc(p.orang)}</div><div class="k">Untuk: ${esc(p.untuk||'-')} • Janji kembali: ${esc(p.janji||'-')}${p.st==='Diambil' && p.janji && new Date(p.janji) < new Date(new Date().toISOString().slice(0,10)) ? ` • <b style="color:#c0483d">TELAT ${(Math.floor((new Date(new Date().toISOString().slice(0,10))-new Date(p.janji))/86400000))} hari!</b>` : ''}</div><div class="k">Dicatat oleh: ${esc(p.oleh||'-')}${p.oleh_kembali?` • Dikembalikan oleh: ${esc(p.oleh_kembali)}`:''}</div></div><div class="k">${p.tgl}</div><div><span class="st ${p.st==='Diambil'?'low':'ok'}">${p.st}</span></div>${p.st==='Diambil'?`<button class="btn sm" onclick="kembali(${esc(JSON.stringify(p.id))})">Kembalikan</button>`:'<span></span>'}</div>`}).join('')}`}
-function ambil(){const k=$('#p1').value,n=+$('#p2').value,o=$('#p3').value.trim(),untuk=$('#p4')?.value.trim()||'-',janji=$('#p5')?.value||'',i=find(k);
- if(n<1||!o)return toast('Isi jumlah dan nama pengambil');if(!untuk||untuk==='-')return toast('Isi Untuk apa, contoh: fitting / foto');if(!janji)return toast('Isi Janji kembali tanggal berapa');if(i.stok<n)return toast('Stok tidak cukup, sisa '+i.stok);
- const olehAmbil=siapa(); (i.stok-=n,addDelta(i.kode,-n));i.oleh=olehAmbil;i.aksi='-'+n+' pcs (diambil '+o+')';i.tgl_ubah=tgl();pinjam.push({id:Date.now().toString(36)+Math.random().toString(36).slice(2,6),kode:k,qty:n,orang:o,untuk:untuk,janji:janji,tgl:tgl(),st:'Diambil',oleh:olehAmbil});saveData();toast('Pengambilan dicatat oleh '+olehAmbil);pinjamV()}
-function kembali(id){const p=pinjam.find(x=>x.id===id);if(!p)return toast('Catatan tidak ditemukan');if(p.st!=='Diambil')return toast('Barang sudah dikembalikan');p.st='Dikembalikan';p.oleh_kembali=siapa();p.tgl_kembali=tgl();const it=find(p.kode);if(it){(it.stok+=p.qty,addDelta(it.kode,p.qty));it.oleh=siapa();it.aksi='+'+p.qty+' pcs (dikembalikan)';it.tgl_ubah=tgl();toast('Barang dikembalikan ke rak '+it.lok+' oleh '+siapa())}else{toast('Barang dikembalikan')}saveData();pinjamV()}
+async function ambil(){
+  const k=$('#p1').value,n=+$('#p2').value,o=$('#p3').value.trim(),untuk=$('#p4')?.value.trim()||'-',janji=$('#p5')?.value||'',i=find(k);
+  if(n<1||!o)return toast('Isi jumlah dan nama pengambil');
+  if(!untuk||untuk==='-')return toast('Isi Untuk apa, contoh: fitting / foto');
+  if(!janji)return toast('Isi Janji kembali tanggal berapa');
+  // PENGAMAN STOK: cek stok terbaru di server dulu, jangan pakai stok lama di HP
+  const srv=await cekStokServer(k);
+  if(srv && typeof srv.stok==='number'){
+    const deltaPending = SYNC.delta[k]||0;
+    const stokServer = srv.stok;
+    // Kalau server lebih baru dan stoknya beda, sesuaikan dulu
+    if(srv.updatedAt && srv.updatedAt>(i.updatedAt||0) && srv.oleh!==siapa()){
+      // Stok lokal yang benar = stok server + delta yang belum ke-sync
+      // Tapi kalau ada konflik stok (server sudah diambil orang lain), tampilkan peringatan
+      const stokEfektif = stokServer + deltaPending;
+      if(stokEfektif < n){
+        pendingEdit={k,n,o,untuk,janji};
+        const milikku={kode:k,lok:i.lok,buyer:i.buyer,color:i.color,kat:i.kat,stok:stokEfektif,oleh:siapa()};
+        tampilKonflik({...srv, stok:stokServer}, milikku, 'ambil');
+        return;
+      }
+      // Sesuaikan tampilan lokal ke stok efektif
+      i.stok = stokEfektif;
+      Object.assign(i, {lok:srv.lok, buyer:srv.buyer, color:srv.color, kat:srv.kat});
+      // Jangan timpa stok dengan stok server mentah, karena delta sudah dihitung di atas
+      i.stok = stokEfektif;
+      try{localStorage.setItem(DATA_KEY, JSON.stringify({items,masuk,pinjam}));}catch(e){}
+      toast('Stok '+k+' baru diubah '+(srv.oleh||'temanmu')+' jadi '+stokServer+' - disesuaikan dulu');
+    }
+  }
+  if(i.stok<n)return toast('Stok tidak cukup, sisa '+i.stok);
+  await ambilPaksa({k,n,o,untuk,janji});
+}
+async function ambilPaksa(p){
+  const {k,n,o,untuk,janji}=p; const i=find(k); if(!i) return toast('Barang tidak ditemukan');
+  const olehAmbil=siapa(); (i.stok-=n,addDelta(i.kode,-n));i.oleh=olehAmbil;i.aksi='-'+n+' pcs (diambil '+o+')';i.tgl_ubah=tgl();bumpVersi(i);pinjam.push({id:Date.now().toString(36)+Math.random().toString(36).slice(2,6),kode:k,qty:n,orang:o,untuk:untuk,janji:janji,tgl:tgl(),st:'Diambil',oleh:olehAmbil});saveData();toast('Pengambilan dicatat oleh '+olehAmbil);pinjamV();
+}
+async function kembali(id){const p=pinjam.find(x=>x.id===id);if(!p)return toast('Catatan tidak ditemukan');if(p.st!=='Diambil')return toast('Barang sudah dikembalikan');p.st='Dikembalikan';p.oleh_kembali=siapa();p.tgl_kembali=tgl();const it=find(p.kode);if(it){const srv=await cekStokServer(p.kode); if(srv && typeof srv.stok==='number' && srv.updatedAt && srv.updatedAt>(it.updatedAt||0) && srv.oleh!==siapa()){ const deltaPending=SYNC.delta[p.kode]||0; it.stok=srv.stok+deltaPending; Object.assign(it,{lok:srv.lok,buyer:srv.buyer,color:srv.color,kat:srv.kat}); it.stok=srv.stok+deltaPending; toast('Stok '+p.kode+' baru diubah '+(srv.oleh||'temanmu')+' - disesuaikan dulu'); } (it.stok+=p.qty,addDelta(it.kode,p.qty));it.oleh=siapa();it.aksi='+'+p.qty+' pcs (dikembalikan)';it.tgl_ubah=tgl();bumpVersi(it);toast('Barang dikembalikan ke rak '+it.lok+' oleh '+siapa())}else{toast('Barang dikembalikan')}saveData();pinjamV()}
 
 $('#gs').addEventListener('keydown',e=>{if(e.key==='Enter'){q=e.target.value;if(view==='daftar'){daftar()}else{kat='';stf='';go('cari')}}});
 $('#gs').addEventListener('input',e=>{q=e.target.value;if(view==='cari'){const qi=$('#q');if(qi&&qi.value!==q)qi.value=q;list()}else if(view==='daftar'){daftar()}});
