@@ -119,6 +119,11 @@ h2{font-size:17px;font-weight:500;margin:24px 4px 10px}
 @media(max-width:980px){.grid,.dgrid{grid-template-columns:1fr}.panel{position:static;width:100%}}
 /* FIX layar kecil: baris jadi bungkus, tombol nggak pernah kedorong keluar */
 @media(max-width:640px){.row{display:flex;flex-wrap:wrap}.row>div:nth-child(2){flex:1 1 160px}.row>div:nth-child(3),.row>div:nth-child(4){flex:1 1 100px}.row .btn{margin-left:auto}}
+
+.saran-item{padding:10px 12px;cursor:pointer;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;gap:10px;align-items:center}
+.saran-item:last-child{border-bottom:0}
+.saran-item:hover{background:var(--pill)}
+.saran-item b{font-weight:600}
 </style></head><body>
 <div class="frame" id="app" inert>
 <aside class="side">
@@ -669,10 +674,28 @@ async function catatMasukPaksa(p){
 
 function fmtTglAmbil(iso){if(!iso)return '-';try{return new Date(iso+'T00:00:00').toLocaleDateString('id-ID',{day:'2-digit',month:'short',year:'numeric'});}catch(e){return iso;}}
 function pinjamV(){
- $('#main').innerHTML=head('Ambil & Kembali')+`<div class="form"><select id="p1">${opts()}</select><input id="p2" type="number" min="1" placeholder="Jumlah"><input id="p3" placeholder="Nama pengambil"><input id="p4" placeholder="Untuk apa? (fitting / foto / cek jahitan / kirim buyer)"><label style="display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--mute)">Tanggal diambil<input id="p5" type="date" value="${new Date().toISOString().slice(0,10)}"></label></div><button class="btn" onclick="ambil()">Catat pengambilan</button>
- <h2>Catatan</h2>${pinjam.slice().reverse().map(p=>{const i=find(p.kode)||{kode:p.kode,nama:p.kode+' (dihapus)',sat:'pcs'};return `<div class="row">${fotoThumb(i)}<div><div class="n">${esc(i.nama)}</div><div class="k">${p.qty} ${esc(i.sat)} - ${esc(p.orang)}</div><div class="k">Untuk: ${esc(p.untuk||'-')} • Diambil: ${esc(p.tgl_ambil ? fmtTglAmbil(p.tgl_ambil) : (p.tgl||'-'))}</div><div class="k">Dicatat oleh: ${esc(p.oleh||'-')}${p.oleh_kembali?` • Dikembalikan oleh: ${esc(p.oleh_kembali)}`:''}</div></div><div class="k">${p.tgl}</div><div><span class="st ${p.st==='Diambil'?'low':'ok'}">${p.st}</span></div>${p.st==='Diambil'?`<button class="btn sm" onclick="kembali(${esc(JSON.stringify(p.id))})">Kembalikan</button>`:'<span></span>'}</div>`}).join('')}`}
+ $('#main').innerHTML=head('Ambil & Kembali')+`<div class="form"><div style="position:relative;flex:1 1 240px;min-width:0"><input id="p1" placeholder="Ketik kode / nama barang... (contoh: SGR / Fida)" autocomplete="off" value="${esc(window._p1last||'')}"><div id="p1saran" style="position:absolute;top:100%;left:0;right:0;z-index:10;background:var(--card);border:1px solid var(--line);border-radius:14px;box-shadow:0 12px 30px rgba(0,0,0,.15);display:none;max-height:240px;overflow:auto"></div><div id="p1pilih" class="k" style="margin-top:4px"></div></div><input id="p2" type="number" min="1" placeholder="Jumlah"><input id="p3" placeholder="Nama pengambil"><input id="p4" placeholder="Untuk apa? (fitting / foto / cek jahitan / kirim buyer)"><label style="display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--mute)">Tanggal diambil<input id="p5" type="date" value="${new Date().toISOString().slice(0,10)}"></label></div><button class="btn" onclick="ambil()">Catat pengambilan</button>
+ <h2>Catatan</h2>${pinjam.slice().reverse().map(p=>{const i=find(p.kode)||{kode:p.kode,nama:p.kode+' (dihapus)',sat:'pcs'};return `<div class="row">${fotoThumb(i)}<div><div class="n">${esc(i.nama)}</div><div class="k">${p.qty} ${esc(i.sat)} - ${esc(p.orang)}</div><div class="k">Untuk: ${esc(p.untuk||'-')} • Diambil: ${esc(p.tgl_ambil ? fmtTglAmbil(p.tgl_ambil) : (p.tgl||'-'))}</div><div class="k">Dicatat oleh: ${esc(p.oleh||'-')}${p.oleh_kembali?` • Dikembalikan oleh: ${esc(p.oleh_kembali)}`:''}</div></div><div class="k">${p.tgl}</div><div><span class="st ${p.st==='Diambil'?'low':'ok'}">${p.st}</span></div>${p.st==='Diambil'?`<button class="btn sm" onclick="kembali(${esc(JSON.stringify(p.id))})">Kembalikan</button>`:'<span></span>'}</div>`}).join('')}`;
+ // === CARI BARANG KETIK, BUKAN SCROLL DROPDOWN ===
+ const inp=$('#p1'), saranBox=$('#p1saran'), pilihInfo=$('#p1pilih');
+ function tampilPilih(kode){ const it=find(kode); if(it){ pilihInfo.innerHTML=`Dipilih: <b>${esc(it.kode)}</b> - ${esc(it.nama)} • Stok ${it.stok} ${esc(it.sat)} • ${esc(it.lok)}`; } else { pilihInfo.innerHTML=''; } }
+ if(window._p1kode) tampilPilih(window._p1kode);
+ function renderSaran(q){
+   const qq=(q||'').trim().toLowerCase();
+   if(!qq){ saranBox.style.display='none'; saranBox.innerHTML=''; return; }
+   const hasil=items.filter(i=> (i.kode+' '+i.nama+' '+(i.buyer||'')+' '+(i.lok||'')).toLowerCase().includes(qq)).slice(0,8);
+   if(!hasil.length){ saranBox.innerHTML=`<div style="padding:10px 12px" class="k">Tidak ketemu. Coba ketik kode / nama lain.</div>`; saranBox.style.display='block'; return; }
+   saranBox.innerHTML=hasil.map(i=>`<div class="saran-item" data-kode="${esc(i.kode)}"><div><b>${esc(i.kode)}</b><div class="k">${esc(i.nama)} • ${esc(i.lok)}</div></div><div class="k">Stok ${i.stok}</div></div>`).join('');
+   saranBox.style.display='block';
+   saranBox.querySelectorAll('.saran-item').forEach(el=>{ el.onclick=()=>{ const kode=el.getAttribute('data-kode'); const it=find(kode); window._p1kode=kode; window._p1last=it? (it.kode+' - '+it.nama) : kode; inp.value=window._p1last; tampilPilih(kode); saranBox.style.display='none'; $('#p2')?.focus(); }; });
+ }
+ inp.addEventListener('input',()=>{ window._p1kode=''; window._p1last=inp.value; renderSaran(inp.value); pilihInfo.innerHTML=''; });
+ inp.addEventListener('focus',()=>{ renderSaran(inp.value); });
+ // Klik di luar = tutup saran
+ setTimeout(()=>{ document.addEventListener('click', function tutupSaran(e){ if(!e.target.closest || !e.target.closest('#p1') && !e.target.closest('#p1saran')){ if(saranBox) saranBox.style.display='none'; } }); },0);
+}
 async function ambil(){
-  const k=$('#p1').value,n=+$('#p2').value,o=$('#p3').value.trim(),untuk=$('#p4')?.value.trim()||'-',tglAmbil=$('#p5')?.value||new Date().toISOString().slice(0,10),i=find(k);
+  const rawP1=$('#p1').value.trim(); let k=window._p1kode||''; if(!k || !rawP1.toLowerCase().includes(k.toLowerCase())){ const itCari=find(rawP1) || items.find(i=> rawP1.toLowerCase().includes(i.kode.toLowerCase())) || items.find(i=> (i.kode+' - '+i.nama).toLowerCase()===rawP1.toLowerCase()) || items.find(i=> i.kode.toLowerCase().startsWith(rawP1.toLowerCase())) || items.find(i=> (i.nama||'').toLowerCase().includes(rawP1.toLowerCase())); if(itCari){ k=itCari.kode; window._p1kode=k; } else { k=rawP1; } } const n=+$('#p2').value,o=$('#p3').value.trim(),untuk=$('#p4')?.value.trim()||'-',tglAmbil=$('#p5')?.value||new Date().toISOString().slice(0,10),i=find(k); if(!i) return toast('Barang tidak ditemukan. Ketik kode / nama, lalu pilih dari saran yang muncul.');
   if(n<1||!o)return toast('Isi jumlah dan nama pengambil');
   if(!untuk||untuk==='-')return toast('Isi Untuk apa, contoh: fitting / foto');
   // Tanggal diambil boleh kosong, otomatis pakai hari ini. Tidak wajib isi janji lagi.
@@ -706,7 +729,7 @@ async function ambil(){
 }
 async function ambilPaksa(p){
   const {k,n,o,untuk,tglAmbil}=p; const tglAmbilFix=tglAmbil||new Date().toISOString().slice(0,10); let tglDiambil=tgl(); try{tglDiambil=new Date(tglAmbilFix+'T00:00:00').toLocaleDateString('id-ID');}catch(e){} const i=find(k); if(!i) return toast('Barang tidak ditemukan');
-  const olehAmbil=siapa(); (i.stok-=n,addDelta(i.kode,-n));i.oleh=olehAmbil;i.aksi='-'+n+' pcs (diambil '+o+')';i.tgl_ubah=tgl();bumpVersi(i);pinjam.push({id:Date.now().toString(36)+Math.random().toString(36).slice(2,6),kode:k,qty:n,orang:o,untuk:untuk,tgl_ambil:tglAmbilFix,janji:tglAmbilFix,tgl:tglDiambil,st:'Diambil',oleh:olehAmbil});saveData();toast('Pengambilan dicatat oleh '+olehAmbil);pinjamV();
+  const olehAmbil=siapa(); (i.stok-=n,addDelta(i.kode,-n));i.oleh=olehAmbil;i.aksi='-'+n+' pcs (diambil '+o+')';i.tgl_ubah=tgl();bumpVersi(i);pinjam.push({id:Date.now().toString(36)+Math.random().toString(36).slice(2,6),kode:k,qty:n,orang:o,untuk:untuk,tgl_ambil:tglAmbilFix,janji:tglAmbilFix,tgl:tglDiambil,st:'Diambil',oleh:olehAmbil});window._p1kode=''; window._p1last=''; saveData();toast('Pengambilan dicatat oleh '+olehAmbil);pinjamV();
 }
 async function kembali(id){const p=pinjam.find(x=>x.id===id);if(!p)return toast('Catatan tidak ditemukan');if(p.st!=='Diambil')return toast('Barang sudah dikembalikan');p.st='Dikembalikan';p.oleh_kembali=siapa();p.tgl_kembali=tgl();const it=find(p.kode);if(it){const srv=await cekStokServer(p.kode); if(srv && typeof srv.stok==='number' && srv.updatedAt && srv.updatedAt>(it.updatedAt||0) && srv.oleh!==siapa()){ const deltaPending=SYNC.delta[p.kode]||0; it.stok=srv.stok+deltaPending; Object.assign(it,{lok:srv.lok,buyer:srv.buyer,color:srv.color,kat:srv.kat}); it.stok=srv.stok+deltaPending; toast('Stok '+p.kode+' baru diubah '+(srv.oleh||'temanmu')+' - disesuaikan dulu'); } (it.stok+=p.qty,addDelta(it.kode,p.qty));it.oleh=siapa();it.aksi='+'+p.qty+' pcs (dikembalikan)';it.tgl_ubah=tgl();bumpVersi(it);toast('Barang dikembalikan ke rak '+it.lok+' oleh '+siapa())}else{toast('Barang dikembalikan')}saveData();pinjamV()}
 
