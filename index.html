@@ -155,14 +155,14 @@ const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'
 const IC={dash:'<path d="M3 11l9-8 9 8v9a1 1 0 01-1 1h-5v-6H9v6H4a1 1 0 01-1-1z"/>',cari:'<circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/>',daftar:'<path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>',masuk:'<path d="M12 3v12M7 10l5 5 5-5M4 21h16"/>',pinjam:'<path d="M7 7h12l-3-3M17 17H5l3 3"/>',out:'<path d="M9 4H5v16h4M16 8l4 4-4 4M20 12H9"/>',panduan:'<path d="M4 5a2 2 0 012-2h13v16H6a2 2 0 00-2 2zM4 19a2 2 0 012-2h13"/><path d="M9 7h6M9 11h6"/>',riwayat:'<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/>'};
 const VIEWS=[['dash','Dasbor'],['cari','Cari Lokasi'],['daftar','Daftar Sampel'],['masuk','Barang Masuk'],['pinjam','Ambil & Kembali'],['riwayat','Riwayat 14 Hari']];
 let riwayatFilter='Semua';
-let items=[
-{kode:'SGR 0000000001',nama:'Kemeja Lengan Panjang',kat:'Garment',stok:3,sat:'pcs',lok:'Januari General 1',min:0,buyer:'Ann Taylor',style:'AT-2026-01',color:'Putih, Hitam'},
-{kode:'SGR 0000000002',nama:'Hoodie',kat:'Garment',stok:3,sat:'pcs',lok:'Januari General 1',min:0,buyer:'LL Bean',style:'LB-2026-02',color:'Navy, Abu'},
-{kode:'SGR 0000000003',nama:'Kaos Oversize',kat:'Garment',stok:3,sat:'pcs',lok:'Januari General 1',min:0,buyer:'Target',style:'TG-2026-03',color:'Putih, Hitam, Navy, Abu'}];
+// 3 barang sampel sudah dihapus permanen - daftar ini cuma jadi filter
+// biar kalau data lama masih ada di HP lain / di cloud, tidak muncul lagi
+const SAMPEL_DIHAPUS=['SGR 0000000001','SGR 0000000002','SGR 0000000003'];
+let items=[];
 let masuk=[];
 let pinjam=[];
 // DAYS dihapus, grafik sekarang dari last14()
-let view='dash',q='',kat='',stf='',sel='SGR 0000000001',selD=13;
+let view='dash',q='',kat='',stf='',sel='',selD=13;
 const tgl=()=>new Date().toLocaleDateString('id-ID');
 const find=k=>items.find(i=>i.kode===k);
 function siapa(){try{const w=$('#who')?.textContent?.trim(); if(w && w!=='Admin Gudang' && $('#login')?.hidden) return w;}catch(e){} try{const s=JSON.parse(localStorage.getItem('gk_session')||'{}'); if(s.u) return s.u;}catch(e){} try{const u=localStorage.getItem('gk_user'); if(u) return u;}catch(e){} return 'Admin Gudang';}
@@ -201,14 +201,18 @@ function startSync(){
     if(typeof go==='function'&&!(document.activeElement&&document.activeElement.matches&&document.activeElement.matches('input,textarea,select')))go(view||'dash')},250)};
   const watch=(col,get,keyOf)=>{let f=1;SYNC.unsubs.push(db.collection(col).onSnapshot(sn=>{
     sn.docChanges().forEach(c=>{if(c.doc.metadata.hasPendingWrites)return;const d=c.doc.data(),k=col+'/'+c.doc.id,a=get(),ix=a.findIndex(x=>keyOf(x)===c.doc.id);
+      // Sampel yang sudah dihapus: jangan dimunculkan lagi, hapus juga dari cloud
+      if(col==='gudang_barang'&&(SAMPEL_DIHAPUS.includes(d.kode)||SAMPEL_DIHAPUS.map(sid).includes(c.doc.id))){if(ix>=0)a.splice(ix,1);delete SYNC.sent[k];try{db.collection(col).doc(c.doc.id).delete()}catch(e){}return}
       if(c.type==='removed'){if(ix>=0)a.splice(ix,1);delete SYNC.sent[k];return}
       let o;if(ix>=0){o=Object.assign(a[ix],d)}else{o=d;a.push(o)}
       const cp={...o};delete cp.foto;SYNC.sent[k]=sj(cp)});
     ren();if(f){f=0;done()}},e=>setSync('Gagal sinkron: '+(e.code||e.message),1)))};
   watch('gudang_barang',()=>items,x=>sid(x.kode));watch('gudang_masuk',()=>masuk,x=>x.id);watch('gudang_pinjam',()=>pinjam,x=>x.id);
 }
-function loadData(){try{const raw=localStorage.getItem(DATA_KEY);if(!raw)return;const d=JSON.parse(raw);if(Array.isArray(d.items)&&d.items.length)items=d.items;if(Array.isArray(d.masuk))masuk=d.masuk;if(Array.isArray(d.pinjam))pinjam=d.pinjam;}catch(e){}}
+function loadData(){try{const raw=localStorage.getItem(DATA_KEY);if(!raw)return;const d=JSON.parse(raw);if(Array.isArray(d.items))items=d.items.filter(i=>i&&!SAMPEL_DIHAPUS.includes(i.kode));if(Array.isArray(d.masuk))masuk=d.masuk.filter(m=>m&&!SAMPEL_DIHAPUS.includes(m.kode));if(Array.isArray(d.pinjam))pinjam=d.pinjam.filter(p=>p&&!SAMPEL_DIHAPUS.includes(p.kode));}catch(e){}items=items.filter(i=>i&&!SAMPEL_DIHAPUS.includes(i.kode));}
 loadData();
+// Langsung timpa localStorage lama biar sampel tidak kebaca lagi pas refresh berikutnya
+try{localStorage.setItem(DATA_KEY,JSON.stringify({items,masuk,pinjam}))}catch(e){}
 
 
 // --- FOTO: Upload dari galeri + auto kompres, siap Firebase ---
@@ -528,7 +532,7 @@ async function imporLama(){
     const d=doc.data(),oi=Array.isArray(d.items)?d.items:[],om=Array.isArray(d.masuk)?d.masuk:[],op=Array.isArray(d.pinjam)?d.pinjam:[];
     let a=0,b=0,c=0;
     const kd=new Set(items.map(i=>String(i.kode).toLowerCase()));
-    oi.forEach(i=>{if(i&&i.kode&&!kd.has(String(i.kode).toLowerCase())){items.push(i);kd.add(String(i.kode).toLowerCase());a++}});
+    oi.forEach(i=>{if(i&&i.kode&&!SAMPEL_DIHAPUS.includes(i.kode)&&!kd.has(String(i.kode).toLowerCase())){items.push(i);kd.add(String(i.kode).toLowerCase());a++}});
     const ms=m=>[m.tgl,m.kode,m.qty,m.sup,m.oleh].join('|'),mset=new Set(masuk.map(ms));
     om.forEach(m=>{if(m&&!mset.has(ms(m))){masuk.push(m);mset.add(ms(m));b++}});
     const ps=p=>[p.tgl,p.kode,p.qty,p.orang,p.untuk].join('|'),pset=new Set(pinjam.map(ps)),pid=new Set(pinjam.map(p=>p.id));
